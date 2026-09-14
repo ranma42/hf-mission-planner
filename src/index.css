@@ -48,12 +48,45 @@ canvas { display: block; }
 .PathInfo-label {
   font-weight: bold;
 }
+.PathInfo-metricRow {
+  cursor: grab;
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+}
+.PathInfo-metricRow.dragging {
+  opacity: 0.5;
+  background: rgba(255, 255, 255, 0.15);
+  cursor: grabbing;
+}
+.PathInfo-dragHandle {
+  font-size: 14px;
+  opacity: 0.5;
+  line-height: 1;
+  user-select: none;
+}
+.PathInfo-label {
+  flex: 1;
+}
+.PathInfo-priorityButtons {
+  display: flex;
+  gap: 2px;
+}
 .PathInfo-priorityButton {
   color: white;
   background: transparent;
   border: none;
   font-size: 14px;
+  line-height: 1;
+  padding: 4px 2px;
   cursor: pointer;
+}
+.PathInfo-priorityButton:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+.PathInfo-priorityButton:not(:disabled):active {
+  transform: translateY(1px);
 }
 .PathInfo-destinationRow {
   align-self: flex-start;

@@ -748,10 +748,12 @@ const synodicStrokeColors = {
 /** @typedef {'burns'|'turns'|'hazards'|'radHazards'} MetricKey */
 /** @type {MetricKey[]} */
 let metricPriority = ['burns', 'turns', 'hazards', 'radHazards']
-/** @param {MetricKey} metric */
-function prioritizeMetric(metric) {
-  if (!metricPriority.includes(metric)) return
-  metricPriority = [metric, ...metricPriority.filter(m => m !== metric)]
+/** @param {MetricKey[]} order */
+function setMetricPriority(order) {
+  if (order.length !== metricPriority.length) return
+  if (!order.every(m => metricPriority.includes(m))) return
+  if (order.every((m, i) => m === metricPriority[i])) return
+  metricPriority = order
   recomputeHighlightedPath()
   draw()
 }
@@ -1144,7 +1146,7 @@ function draw() {
     ctx.restore()
   }
   const weight = pathWeight(highlightedPath)
-  ReactDOM.render(React.createElement(Overlay, {mapData, path: highlightedPath, weight, metricPriority, prioritizeMetric, cancelPath: () => { cancelPathSelection(); draw() }, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}), overlay)
+  ReactDOM.render(React.createElement(Overlay, {mapData, path: highlightedPath, weight, metricPriority, setMetricPriority, cancelPath: () => { cancelPathSelection(); draw() }, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}), overlay)
 }
 
 /** @param {number} burns */

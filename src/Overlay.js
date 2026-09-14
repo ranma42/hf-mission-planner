@@ -9,10 +9,23 @@ const pl = (n, sg, pl) => n === 1 ? `${n} ${sg}` : `${n} ${pl}`
 
 /** @typedef {import('./MapData').MapData} MapData */
 
-/** @param {{mapData: MapData, path: PathNode[]|null, weight: {burns: number, turns: number, hazards: number, radHazards: number}, metricPriority: MetricKey[], prioritizeMetric: (metric: MetricKey) => void, cancelPath: () => void}} props */
-function PathInfo({mapData, path, weight, metricPriority, prioritizeMetric, cancelPath}) {
+/** @param {MetricKey[]} order @param {MetricKey} key @param {MetricKey} target @returns {MetricKey[]} */
+function moveMetricTo(order, key, target) {
+  const from = order.indexOf(key)
+  const to = order.indexOf(target)
+  if (from < 0 || to < 0 || from === to) return order
+  const next = [...order]
+  next.splice(to, 0, ...next.splice(from, 1))
+  return next
+}
+
+/** @param {{mapData: MapData, path: PathNode[]|null, weight: {burns: number, turns: number, hazards: number, radHazards: number}, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, cancelPath: () => void}} props */
+function PathInfo({mapData, path, weight, metricPriority, setMetricPriority, cancelPath}) {
+  /** @type {[{key: MetricKey, order: MetricKey[]}|null, (drag: {key: MetricKey, order: MetricKey[]}|null) => void]} */
+  const [drag, setDrag] = React.useState(null)
+
   if (!path) return e('div')
-  
+
   const sourcePoint = path ? mapData.points[path[0].node] : null
   const destinationPoint = path ? mapData.points[path[path.length - 1].node] : null
 
@@ -22,30 +35,82 @@ function PathInfo({mapData, path, weight, metricPriority, prioritizeMetric, canc
     hazards: {sg: 'hazard', pl: 'hazards'},
     radHazards: {sg: 'rad hazard', pl: 'rad hazards'},
   }
-  const orderedMetrics = metricPriority
-    .map(key => ({key, ...metricMeta[key]}))
+  // While dragging, show the previewed order; commit it only on drop.
+  const displayOrder = drag ? drag.order : metricPriority
+
+  /** @param {MetricKey} key @param {number} delta */
+  const moveBy = (key, delta) => {
+    const from = metricPriority.indexOf(key)
+    const to = from + delta
+    if (from < 0 || to < 0 || to >= metricPriority.length) return
+    const next = [...metricPriority]
+    next.splice(to, 0, ...next.splice(from, 1))
+    setMetricPriority(next)
+  }
+
+  /** @param {React.DragEvent} ev @param {MetricKey} key */
+  const onDragOverRow = (ev, key) => {
+    if (!drag) return
+    ev.preventDefault()
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
+    if (key === drag.key) return
+    const next = moveMetricTo(drag.order, drag.key, key)
+    if (next !== drag.order) setDrag({key: drag.key, order: next})
+  }
 
   return e('div', {className: 'PathInfo'},
-    orderedMetrics.map(({key, sg, pl: plural}) => {
-      const topPriority = metricPriority[0] === key
-      return e('div', {key, className: 'PathInfo-row'},
+    displayOrder.map((key, i) => {
+      const {sg, pl: plural} = metricMeta[key]
+      return e('div', {
+        key,
+        className: 'PathInfo-row PathInfo-metricRow' + (drag && drag.key === key ? ' dragging' : ''),
+        draggable: true,
+        onDragStart: (/** @type {React.DragEvent} */ ev) => {
+          if (ev.dataTransfer) {
+            ev.dataTransfer.effectAllowed = 'move'
+            // Firefox requires some data to be set for a drag to start.
+            ev.dataTransfer.setData('text/plain', key)
+          }
+          setDrag({key, order: displayOrder})
+        },
+        onDragOver: (/** @type {React.DragEvent} */ ev) => onDragOverRow(ev, key),
+        onDrop: (/** @type {React.DragEvent} */ ev) => {
+          ev.preventDefault()
+          if (drag) setMetricPriority(drag.order)
+          setDrag(null)
+        },
+        onDragEnd: () => setDrag(null),
+      },
+        e('span', {className: 'PathInfo-dragHandle', 'aria-hidden': true}, '⠿'),
         e('span', {className: 'PathInfo-label'}, `${pl(weight[key], sg, plural)}`),
-        topPriority ? null : e('button', {
-          type: 'button',
-          className: 'PathInfo-priorityButton' + (topPriority ? ' selected' : ''),
-          'aria-pressed': topPriority,
-          onClick: () => prioritizeMetric(key),
-        }, '⬆'),
+        e('span', {className: 'PathInfo-priorityButtons'},
+          e('button', {
+            type: 'button',
+            className: 'PathInfo-priorityButton',
+            'aria-label': `Increase priority of ${plural}`,
+            title: `Increase priority of ${plural}`,
+            disabled: i === 0,
+            onClick: () => moveBy(key, -1),
+          }, '⬆'),
+          e('button', {
+            type: 'button',
+            className: 'PathInfo-priorityButton',
+            'aria-label': `Decrease priority of ${plural}`,
+            title: `Decrease priority of ${plural}`,
+            disabled: i === displayOrder.length - 1,
+            onClick: () => moveBy(key, 1),
+          }, '⬇'),
+        ),
       )
     }),
     e('div', {className: 'PathInfo-row PathInfo-destinationRow'},
-      e('span', {className: 'PathInfo-destination'}, `${sourcePoint?.siteName ?? '•'} → ${destinationPoint?.siteName ?? '•'}`),
+      e('span', {className: 'PathInfo-destination'}, `${sourcePoint?.siteName ?? '\u2022'} \u2192 ${destinationPoint?.siteName ?? '\u2022'}`),
       e('button', {
         type: 'button',
         className: 'PathInfo-cancelButton',
         'aria-label': 'Cancel path',
         onClick: cancelPath,
-      }, '✕'),
+      }, '\u2715'),
     ),
   )
 }
@@ -145,10 +210,10 @@ function VehicleInfo({isru, setIsru, thrust, setThrust, enabledSiteTypes, toggle
   )
 }
 
-/** @param {{mapData: MapData, path: PathNode[]|null, weight: {burns: number, turns: number, hazards: number, radHazards: number}, metricPriority: MetricKey[], prioritizeMetric: (metric: MetricKey) => void, cancelPath: () => void, isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} props */
-export function Overlay({mapData, path, weight, metricPriority, prioritizeMetric, cancelPath, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
+/** @param {{mapData: MapData, path: PathNode[]|null, weight: {burns: number, turns: number, hazards: number, radHazards: number}, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, cancelPath: () => void, isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} props */
+export function Overlay({mapData, path, weight, metricPriority, setMetricPriority, cancelPath, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
   return e(React.Fragment, null,
-    PathInfo({mapData, path, weight, metricPriority, prioritizeMetric, cancelPath}),
-    VehicleInfo({isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}),
+    e(PathInfo, {mapData, path, weight, metricPriority, setMetricPriority, cancelPath}),
+    e(VehicleInfo, {isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}),
   )
 }
