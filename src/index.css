@@ -339,7 +339,10 @@ canvas { display: block; }
 }
 .VehicleInfo .isru-buttons {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* One equal column per button, however many there are: a hardcoded count
+     silently wrapped the pivot row, which has one more than the ISRU row. */
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 6px;
 }
 .VehicleInfo .isru-button {

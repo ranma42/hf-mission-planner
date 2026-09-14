@@ -157,12 +157,14 @@ function PathInfo({mapData, path, weight, metricPriority, setMetricPriority, exp
 
 const isruLevels = [0, 1, 2, 3, 4]
 
+const pivotLevels = [0, 1, 2, 3, 4, 5]
+
 const siteTypeOptions = ['C', 'S', 'M', 'V', 'D', 'H']
 
 const solarSeasonOptions = ['red', 'yellow', 'blue']
 
-/** @param {{isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} param0 */
-function VehicleInfo({isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
+/** @param {{isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, pivots: number, setPivots: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} param0 */
+function VehicleInfo({isru, setIsru, thrust, setThrust, pivots, setPivots, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
   /** @param {string} value */
   const updateThrust = (value) => {
     const n = Number(value)
@@ -198,6 +200,22 @@ function VehicleInfo({isru, setIsru, thrust, setThrust, enabledSiteTypes, toggle
             inputMode: 'numeric',
             onChange: (ev) => updateThrust(ev.target.value),
           }),
+        )
+      ),
+      e('div', {className: 'field', role: 'group', 'aria-label': 'Pivots'},
+        e('div', {className: 'label-row'},
+          e('span', {className: 'label'}, 'Pivots'),
+        ),
+        e('div', {className: 'isru-buttons'},
+          pivotLevels.map(level =>
+            e('button', {
+              key: level,
+              type: 'button',
+              className: 'isru-button' + (pivots === level ? ' selected' : ''),
+              'aria-pressed': pivots === level,
+              onClick: () => setPivots(level),
+            }, String(level))
+          )
         )
       ),
       e('div', {className: 'field', role: 'group', 'aria-label': 'Solar Season'},
@@ -250,10 +268,10 @@ function VehicleInfo({isru, setIsru, thrust, setThrust, enabledSiteTypes, toggle
   )
 }
 
-/** @param {{mapData: MapData, path: PathNode[]|null, weight: MetricWeights, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, exploring: boolean, toggleExplore: () => void, solutions: Solution[], solutionsComputing: boolean, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void, cancelPath: () => void, isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} props */
-export function Overlay({mapData, path, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
+/** @param {{mapData: MapData, path: PathNode[]|null, weight: MetricWeights, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, exploring: boolean, toggleExplore: () => void, solutions: Solution[], solutionsComputing: boolean, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void, cancelPath: () => void, isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, pivots: number, setPivots: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} props */
+export function Overlay({mapData, path, weight, metricPriority, setMetricPriority, pivots, setPivots, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
   return e(React.Fragment, null,
     e(PathInfo, {mapData, path, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath}),
-    e(VehicleInfo, {isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}),
+    e(VehicleInfo, {isru, setIsru, thrust, setThrust, pivots, setPivots, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}),
   )
 }

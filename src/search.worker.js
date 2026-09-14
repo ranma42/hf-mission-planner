@@ -12,8 +12,8 @@ import { MapData } from './MapData'
  * costs correctness nothing.
  */
 self.onmessage = (/** @type {MessageEvent} */ event) => {
-  const {id, map, thrust, solarSeason, metricPriority, fromId, toId} = event.data
-  const search = createSearch({mapData: MapData.fromJSON(map), thrust, solarSeason, metricPriority})
+  const {id, map, thrust, pivots, solarSeason, metricPriority, fromId, toId} = event.data
+  const search = createSearch({mapData: MapData.fromJSON(map), thrust, pivots, solarSeason, metricPriority})
 
   try {
     const front = search.findSolutions(fromId, toId, (/** @type {Solution[]} */ partial) => {

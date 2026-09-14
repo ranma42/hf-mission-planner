@@ -9,6 +9,7 @@ export const ALL_METRICS = ['burns', 'turns', 'hazards', 'radHazards']
  * @typedef {object} SearchContext
  * @property {import('./MapData').MapData} mapData
  * @property {number} thrust
+ * @property {number} pivots direction changes the vehicle may make per turn
  * @property {string} solarSeason
  * @property {MetricKey[]} metricPriority tie-break order for single-path searches
  */
@@ -16,14 +17,14 @@ export const ALL_METRICS = ['burns', 'turns', 'hazards', 'radHazards']
 /**
  * All route-finding for a fixed vehicle and map.
  *
- * The context is captured by value, so a change to thrust, the solar
+ * The context is captured by value, so a change to thrust, pivots, the solar
  * season or the map means building a new one — that is what lets the identical
  * code run inside a worker, where there is no shared mutable module state to
  * read from.
  *
  * @param {SearchContext} context
  */
-export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
+export function createSearch({mapData, thrust, pivots, solarSeason, metricPriority}) {
   /**
    * Are you allowed to go to u from v, given the path previous?
    * @param {PathNode} u
@@ -70,18 +71,19 @@ export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
   function getNeighbors(p) {
     // Done is a terminal state.
     if (p.done) return [];
-    const {node, dir, bonus, burnsRemaining, wait} = p
+    const {node, dir, bonus, burnsRemaining, pivotsRemaining, wait} = p
     /** @type {PathNode[]} */
-    const ns = [{node, dir: null, bonus: 0, done: true, burnsRemaining}] // Ending the turn is always valid. TODO: not on a lander burn!
+    const ns = [{node, dir: null, bonus: 0, done: true, burnsRemaining, pivotsRemaining}] // Ending the turn is always valid. TODO: not on a lander burn!
     const { edgeLabels, points } = mapData
     const venusFlybyAvailable = solarSeason === 'blue'
     if (edgeLabels[node] && dir != null && !wait) {
       /**
-       * Leave the Hohmann towards `otherNode`, paying `burnCost` burns.
-       * @param {string} otherNode @param {string|null} newDir @param {number} burnCost
+       * Leave the Hohmann towards `otherNode`, paying `burnCost` burns and
+       * `pivotCost` of the turn's pivot allowance.
+       * @param {string} otherNode @param {string|null} newDir @param {number} burnCost @param {number} pivotCost
        */
-      const exitHohmann = (otherNode, newDir, burnCost) => {
-        if (burnCost > burnsRemaining) return
+      const exitHohmann = (otherNode, newDir, burnCost, pivotCost) => {
+        if (burnCost > burnsRemaining || pivotCost > pivotsRemaining) return
         const bonusAfterHohmann = Math.max(bonus - burnCost, 0)
         const bonusBurnsUsed = bonus - bonusAfterHohmann
         ns.push({
@@ -89,6 +91,7 @@ export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
           dir: newDir,
           bonus: bonusAfterHohmann,
           burnsRemaining: burnsRemaining - burnCost + bonusBurnsUsed,
+          pivotsRemaining: pivotsRemaining - pivotCost,
         })
       }
       for (const otherNode of Object.keys(edgeLabels[node])) {
@@ -99,13 +102,19 @@ export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
           const entryCost = points[otherNode].type === 'burn' ? (points[otherNode].landing ?? 1) : 0
           const otherNodeType = points[otherNode].type
           const newDir = otherNodeType === 'hohmann' || otherNodeType === 'decorative' ? edgeLabels[node][otherNode] : null
-          exitHohmann(otherNode, newDir, turnCost + entryCost)
+          // Burn through the Hohmann...
+          exitHohmann(otherNode, newDir, turnCost + entryCost, 0)
+          // ...or spend a pivot in place of the direction change. The pivot is
+          // free -- the allowance is the whole constraint -- so the only thing
+          // stopping this is having none left this turn. The target node's own
+          // entry cost is still paid in burns.
+          if (turnCost > 0) exitHohmann(otherNode, newDir, entryCost, 1)
         }
       }
     }
     if (!wait && (points[node].type === 'hohmann' || ((points[node].type === 'burn' || points[node].type === 'lagrange') && burnsRemaining === 0))) {
-      // Wait a turn.
-      ns.push({node, dir: null, bonus: 0, wait: true, burnsRemaining: thrust})
+      // Wait a turn. Both the burn and the pivot allowance refresh.
+      ns.push({node, dir: null, bonus: 0, wait: true, burnsRemaining: thrust, pivotsRemaining: pivots})
     }
     for (const other of mapData.neighborsOf(node)) {
       if (edgeLabels[other] && edgeLabels[other][node] === '0')
@@ -118,7 +127,7 @@ export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
         const bonusUsed = points[other].landing ? 0 : Math.min(bonus, entryCost)
         const bonusAfterEntry = Math.max(bonus - bonusUsed + flybyBoost, 0)
         if (burnsRemaining >= entryCost - bonusUsed)
-          ns.push({node: other, dir, bonus: bonusAfterEntry, burnsRemaining: burnsRemaining - (entryCost - bonusUsed)})
+          ns.push({node: other, dir, bonus: bonusAfterEntry, burnsRemaining: burnsRemaining - (entryCost - bonusUsed), pivotsRemaining})
       }
     }
     return ns
@@ -220,7 +229,7 @@ export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
     }
   }
 
-  /** @typedef {{weight: number[], burnsRemaining: number, bonus: number}} DominanceEntry */
+  /** @typedef {{weight: number[], burnsRemaining: number, pivotsRemaining: number, bonus: number}} DominanceEntry */
   /** @returns {(node: PathNode, weight: number[]) => boolean} */
   function makeDominancePrune() {
     /** @param {PathNode} node */
@@ -235,20 +244,21 @@ export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
     return (node, weight) => {
       const key = dominanceKey(node)
       const br = node.burnsRemaining ?? 0
+      const pr = node.pivotsRemaining ?? 0
       const bonus = node.bonus ?? 0
       const entries = frontier.get(key)
 
       if (entries) {
         for (const e of entries) {
-          if (tupleNs.lessThanEq(e.weight, weight) && e.burnsRemaining >= br && e.bonus >= bonus) {
+          if (tupleNs.lessThanEq(e.weight, weight) && e.burnsRemaining >= br && e.pivotsRemaining >= pr && e.bonus >= bonus) {
             return true
           }
         }
-        const kept = entries.filter(e => !(tupleNs.lessThanEq(weight, e.weight) && br >= e.burnsRemaining && bonus >= e.bonus))
-        kept.push({weight, burnsRemaining: br, bonus})
+        const kept = entries.filter(e => !(tupleNs.lessThanEq(weight, e.weight) && br >= e.burnsRemaining && pr >= e.pivotsRemaining && bonus >= e.bonus))
+        kept.push({weight, burnsRemaining: br, pivotsRemaining: pr, bonus})
         frontier.set(key, kept)
       } else {
-        frontier.set(key, [{weight, burnsRemaining: br, bonus}])
+        frontier.set(key, [{weight, burnsRemaining: br, pivotsRemaining: pr, bonus}])
       }
       return false
     }
@@ -263,7 +273,7 @@ export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
     // Fast, collision-resistant encoding for path state.
     const id = p.done
       ? p.node
-      : `s:${p.node}|${p.dir ?? ''}|${p.bonus}|${p.burnsRemaining}|${p.wait ? 1 : 0}`
+      : `s:${p.node}|${p.dir ?? ''}|${p.bonus}|${p.burnsRemaining}|${p.pivotsRemaining}|${p.wait ? 1 : 0}`
     // Cache on the object; symbol property stays non-enumerable in JSON/stringify.
     Object.defineProperty(p, PATH_ID, {value: id})
     return id
@@ -288,7 +298,7 @@ export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
     if (timed) console.time('calculating paths')
 
     const dominancePrune = makeDominancePrune()
-    const source = /** @type {PathNode} */ ({node: fromId, dir: null, bonus: 0, burnsRemaining: thrust})
+    const source = /** @type {PathNode} */ ({node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivotsRemaining: pivots})
     const pathData = dijkstra(getNeighbors, makeNodeWeight(order), tupleNs, pathId, source, allowed, dominancePrune, targetId)
 
     if (timed) console.timeEnd('calculating paths')
@@ -303,9 +313,9 @@ export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
    * @returns {PathNode[]|undefined}
    */
   function drawPath({ distance, previous }, fromId, toId) {
-    const source = /** @type {PathNode} */ ({node: fromId, dir: null, bonus: 0, burnsRemaining: thrust})
+    const source = /** @type {PathNode} */ ({node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivotsRemaining: pivots})
 
-    let shorterTo = /** @type {PathNode} */ ({node: toId, dir: null, bonus: 0, done: true, burnsRemaining: 0})
+    let shorterTo = /** @type {PathNode} */ ({node: toId, dir: null, bonus: 0, done: true, burnsRemaining: 0, pivotsRemaining: 0})
     let shorterToId = pathId(shorterTo)
 
     if (shorterToId in distance) {
@@ -322,7 +332,7 @@ export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
       // otherwise pathWeight bills the final step for every remaining burn.
       const pred = path[path.length - 2]
       if (pred) {
-        path[path.length - 1] = {...shorterTo, burnsRemaining: pred.burnsRemaining}
+        path[path.length - 1] = {...shorterTo, burnsRemaining: pred.burnsRemaining, pivotsRemaining: pred.pivotsRemaining}
       }
 
       return path
@@ -435,7 +445,7 @@ export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
       return {weight: pathWeight(path), path}
     }
     console.time('exploring solutions')
-    const source = /** @type {PathNode} */ ({node: fromId, dir: null, bonus: 0, burnsRemaining: thrust})
+    const source = /** @type {PathNode} */ ({node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivotsRemaining: pivots})
     /** @param {PathNode} n */
     const isTarget = (n) => !!n.done && n.node === toId
 
@@ -459,7 +469,7 @@ export function createSearch({mapData, thrust, solarSeason, metricPriority}) {
       // destination is a dead end not worth carrying a label for.
       allowed: (label, v) => (!v.done || isTarget(v)) && allowedAlongChain(label, v),
       key: (n) => `${n.node}|${n.dir ?? ''}|${n.wait ? 'w' : ''}|${n.done ? 'd' : ''}`,
-      resources: (n) => [n.burnsRemaining ?? 0, n.bonus ?? 0],
+      resources: (n) => [n.burnsRemaining ?? 0, n.pivotsRemaining ?? 0, n.bonus ?? 0],
         isTarget,
       bound,
       onProgress: onProgress && (targets => onProgress(targets.map(toSolution))),
