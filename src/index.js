@@ -1060,6 +1060,13 @@ function draw() {
           ctx.textBaseline = 'middle'
           ctx.textAlign = 'center'
           const path = drawPath(pathData, pathOrigin, pId)
+          // pathWeight reports zero for a missing path, which is indistinguishable
+          // from a genuinely free one, so unreachable sites have to be skipped here
+          // rather than filtered out by the label coming back empty.
+          if (!path) {
+            ctx.restore()
+            continue
+          }
           const burns = pathWeight(path).burns ?? 0
           const colors = [
             '#ffffb2',
@@ -1144,6 +1151,9 @@ function draw() {
 function formatBurns(burns) {
   const wholeBurns = Math.floor(burns)
   const halfBurns = burns - wholeBurns
+  // A site reachable for free still needs a marker: an empty label would hide it
+  // entirely, which reads as "not reachable" rather than "costs nothing".
+  if (wholeBurns === 0 && halfBurns === 0) return '0'
   return `${wholeBurns > 0 ? wholeBurns : ''}${halfBurns > 0 ? '½' : ''}`
 }
 
