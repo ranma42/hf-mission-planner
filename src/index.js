@@ -6,7 +6,7 @@ import { select } from 'd3-selection'
 import './index.css'
 import HFMap from '../assets/hf.png'
 import HF4Map from '../assets/hf4.jpg'
-import { dijkstra } from './dijkstra'
+import { createSearch, ALL_METRICS } from './search'
 import { Overlay } from './Overlay'
 import { MapData } from './MapData'
 import { createPanMomentum } from './panMomentum'
@@ -67,15 +67,35 @@ let pathOrigin = null
 /** @type {PathData|null} */
 let pathData = null
 
+const siteTypeOptions = ['C', 'S', 'M', 'V', 'D', 'H']
+/** @type {MetricKey[]} */
+let metricPriority = ['burns', 'turns', 'hazards', 'radHazards']
+let isru = 0
+let thrust = 12
+/** @type {Set<string>} */
+let enabledSiteTypes = new Set(siteTypeOptions)
+
+/** @type {ReturnType<typeof createSearch>} */
+let search
+/** Rebuild the search after any change to the map or the vehicle it captured. */
+function refreshSearch() {
+  search = createSearch({mapData, thrust, solarSeason, metricPriority})
+}
+
 function cancelPathSelection() {
   connecting = null
   pathOrigin = null
   highlightedPath = null
+  previewedPath = null
+  exploring = false
+  solutions = []
+  if (pendingExplore) cancelSearchWorker()
 }
 
 /** @param {MapDataJSON} json */
 const loadData = (json) => {
   mapData = MapData.fromJSON(json)
+  refreshSearch()
   setTimeout(draw, 0)
 }
 
@@ -91,6 +111,7 @@ if ('data' in localStorage) {
 
 function changed() {
   localStorage.data = JSON.stringify(mapData.toJSON())
+  invalidateExploreCache()
 }
 
 function downloadFormattedJSON() {
@@ -123,10 +144,12 @@ canvas.onclick = e => {
     if (!closestId) { return }
 
     if (canPath(closestId)) {
-      highlightedPath = drawPath(pathData, pathOrigin, closestId)
+      highlightedPath = search.drawPath(pathData, pathOrigin, closestId)
       // @ts-ignore
       window.highlightedPath = highlightedPath
       endPathing()
+      previewedPath = null
+      recomputeSolutions({force: true})
     } else {
       beginPathing(closestId)
     }
@@ -139,7 +162,7 @@ canvas.onclick = e => {
 function beginPathing(originId) {
   pathOrigin = originId
   highlightedPath = null
-  pathData = findPath(originId)
+  pathData = search.findPath(originId)
 }
 
 /** @param {string|null|undefined} closestId */
@@ -155,10 +178,12 @@ function endPathing() {
 function recomputeHighlightedPath() {
   const source = pathOrigin ?? highlightedPath?.[0].node
   if (source) {
-    pathData = findPath(source)
+    pathData = search.findPath(source)
     const pathDestination = highlightedPath?.[highlightedPath.length - 1].node
     if (pathDestination)
-      highlightedPath = drawPath(pathData, source, pathDestination)
+      highlightedPath = search.drawPath(pathData, source, pathDestination)
+    previewedPath = null
+    recomputeSolutions()
     draw()
   }
 }
@@ -168,7 +193,7 @@ function refreshPath() {
     const closestId = nearestPoint(mousePos.x, mousePos.y, id => mapData.points[id].type !== 'decorative')
 
     if (canPath(closestId)) {
-      highlightedPath = drawPath(pathData, pathOrigin, closestId)
+      highlightedPath = search.drawPath(pathData, pathOrigin, closestId)
     }
   }
 }
@@ -408,92 +433,7 @@ window.onkeydown = e => {
   draw()
 }
 
-/**
- * Are you allowed to go to u from v, given the path previous?
- * @param {PathNode} u
- * @param {PathNode} v
- * @param {(node: PathNode) => string} id
- * @param {Record<string, PathNode>} previous
- * @returns {boolean}
- */
-function allowed(u, v, id, previous) {
-  const {node: uId} = u
-  const {node: vId} = v
 
-  /** @param {PathNode} n */
-  const prev = (n) => previous[id(n)]
-  
-  // Changing state without moving is permitted. We trust getNeighbors to
-  // prevent infinite cycles.
-  if (uId === vId) return true
-
-  if (prev(u) && mapData.points[u.node].type === 'site') {
-    // Once you enter a site, your turn ends.
-    return false
-  }
-  
-  // Visiting a node we've previously left in the same direction is forbidden.
-
-  // First, walk back in the path until we find a different node.
-  let n = prev(u)
-  while (n?.node === uId) {
-    n = prev(n)
-  }
-  
-  // Then, walk the whole rest of the path. If we find vId anywhere with the
-  // same direction or null direction, filter it out to prevent a loop.
-  while (n) {
-    if (n.node === vId && (n.dir === v.dir || n.dir == null))
-      return false
-    n = prev(n)
-  }
-  return true
-}
-
-/** @param {PathNode} p @returns {PathNode[]} */
-function getNeighbors(p) {
-  // Done is a terminal state.
-  if (p.done) return [];
-  const {node, dir, bonus, burnsRemaining, wait} = p
-  /** @type {PathNode[]} */
-  const ns = [{node, dir: null, bonus: 0, done: true, burnsRemaining}] // Ending the turn is always valid. TODO: not on a lander burn!
-  const { edgeLabels, points } = mapData
-  const venusFlybyAvailable = solarSeason === 'blue'
-  if (edgeLabels[node] && dir != null && !wait) {
-    for (const otherNode of Object.keys(edgeLabels[node])) {
-      if (edgeLabels[node][otherNode] !== dir) {
-        // Burn through a Hohmann.
-        const directionChangeCost = (edgeLabels[node][otherNode] === '0' ? 0 : 2) + (points[otherNode].type === 'burn' ? (points[otherNode].landing ?? 1) : 0)
-        const bonusAfterHohmann = Math.max(bonus - directionChangeCost, 0)
-        const bonusBurnsUsed = bonus - bonusAfterHohmann
-        const burnsRemainingAfterHohmann = burnsRemaining - directionChangeCost + bonusBurnsUsed
-        const otherNodeType = points[otherNode].type
-        const newDir = otherNodeType === 'hohmann' || otherNodeType === 'decorative' ? edgeLabels[node][otherNode] : null
-        if (directionChangeCost <= burnsRemaining)
-          ns.push({node: otherNode, dir: newDir, bonus: bonusAfterHohmann, burnsRemaining: burnsRemainingAfterHohmann})
-      }
-    }
-  }
-  if (!wait && (points[node].type === 'hohmann' || ((points[node].type === 'burn' || points[node].type === 'lagrange') && burnsRemaining === 0))) {
-    // Wait a turn.
-    ns.push({node, dir: null, bonus: 0, wait: true, burnsRemaining: thrust})
-  }
-  for (const other of mapData.neighborsOf(node)) {
-    if (edgeLabels[other] && edgeLabels[other][node] === '0')
-      continue
-    if (!(node in edgeLabels) || !(other in edgeLabels[node]) || edgeLabels[node][other] === dir || dir == null) {
-      const dir = edgeLabels[other] && edgeLabels[other][node] ? edgeLabels[other][node] : null
-      const entryCost = points[other].type === 'burn' ? points[other].landing ?? 1 : 0
-      const flybyBoostRaw = points[other].type === 'venus' && !venusFlybyAvailable ? 0 : points[other].flybyBoost ?? 0
-      const flybyBoost = flybyBoostRaw === 'thrust' ? thrust : flybyBoostRaw
-      const bonusUsed = points[other].landing ? 0 : Math.min(bonus, entryCost)
-      const bonusAfterEntry = Math.max(bonus - bonusUsed + flybyBoost, 0)
-      if (burnsRemaining >= entryCost - bonusUsed)
-        ns.push({node: other, dir, bonus: bonusAfterEntry, burnsRemaining: burnsRemaining - (entryCost - bonusUsed)})
-    }
-  }
-  return ns
-}
 
 const ints = {
   /** @type {number} */ zero: 0,
@@ -501,215 +441,20 @@ const ints = {
   /** @type {(a: number, b: number) => boolean} */ lessThan: (a, b) => a < b
 }
 
-/** @type {{zero: number[], add: (a: number[], b: number[]) => number[], lessThan: (a: number[], b: number[]) => boolean, equals: (a: number[], b: number[]) => boolean, lessThanEq: (a: number[], b: number[]) => boolean}} */
-const tupleNs = {
-  zero: [],
-  add: (a, b) => {
-    const n = Math.max(a.length, b.length)
-    const r = []
-    for (let i = 0; i < n; i++) {
-      r[i] = (a[i] ?? 0) + (b[i] ?? 0)
-    }
-    return r
-  },
-  lessThan: (a, b) => {
-    const n = Math.max(a.length, b.length)
-    for (let i = 0; i < n; i++) {
-      const ai = a[i] ?? 0
-      const bi = b[i] ?? 0
-      if (ai !== bi) return ai < bi
-    }
-    return false
-  },
-  equals: (a, b) => {
-    if (a.length !== b.length) return false
-    for (let i = 0; i < a.length; i++) {
-      if ((a[i] ?? 0) !== (b[i] ?? 0)) return false
-    }
-    return true
-  },
-  lessThanEq: (a, b) => {
-    return tupleNs.lessThan(a, b) || tupleNs.equals(a, b)
-  }
-}
 
-/** @param {PathNode} u @param {PathNode} v */
-function burnWeight(u, v) {
-  const {burnsRemaining: uBurnsRemaining} = u
-  const {burnsRemaining: vBurnsRemaining} = v
-  return vBurnsRemaining < uBurnsRemaining ? uBurnsRemaining - vBurnsRemaining : 0
-}
 
-/** @param {PathNode} u @param {PathNode} v */
-function turnWeight(u, v) {
-  const {wait} = v
-  return wait ? 1 : 0
-}
 
-/** @param {PathNode} u @param {PathNode} v */
-function hazardWeight(u, v) {
-  const { node: uId } = u
-  const { node: vId } = v
-  if (uId === vId) return 0
-  const { points } = mapData
-  if (points[vId].hazard)
-    return 1
-  return 0
-}
 
-/** @param {PathNode} u @param {PathNode} v */
-function radHazardWeight(u, v) {
-  const { node: uId } = u
-  const { node: vId } = v
-  if (uId === vId) return 0
-  const { points } = mapData
-  if (points[vId].type === 'radhaz') {
-    return 1
-  }
-  return 0
-}
 
-/** @param {PathNode} u @param {PathNode} v */
-function segmentWeight(u, v) {
-  const { points } = mapData
-  const vType = points[v.node].type
-  if (vType === 'decorative') {
-    return 0
-  }
-  return 1
-}
 
-/** @param {PathNode} u @param {PathNode} v */
-function edgeWeights(u, v) {
-  const burns = burnWeight(u, v)
-  const turns = turnWeight(u, v)
-  const hazards = hazardWeight(u, v)
-  const radHazards = radHazardWeight(u, v)
-  const segments = segmentWeight(u, v)
-  return {burns, turns, hazards, radHazards, segments}
-}
 
-/** @param {PathNode} u @param {PathNode} v @returns {number[]} */
-function nodeWeight(u, v) {
-  const weights = edgeWeights(u, v)
-  return [...metricPriority.map(key => weights[key]), weights.segments]
-}
 
-/** @typedef {{weight: number[], burnsRemaining: number, bonus: number}} DominanceEntry */
-/** @returns {(node: PathNode, weight: number[]) => boolean} */
-function makeDominancePrune() {
-  /** @param {PathNode} node */
-  const dominanceKey = (node) => {
-    const dir = node.dir ?? ''
-    const wait = node.wait ? 'w' : ''
-    const done = node.done ? 'd' : ''
-    return `${node.node}|${dir}|${wait}|${done}`
-  }
-  /** @type {Map<string, DominanceEntry[]>} */
-  const frontier = new Map
-  return (node, weight) => {
-    const key = dominanceKey(node)
-    const br = node.burnsRemaining ?? 0
-    const bonus = node.bonus ?? 0
-    const entries = frontier.get(key)
 
-    if (entries) {
-      for (const e of entries) {
-        if (tupleNs.lessThanEq(e.weight, weight) && e.burnsRemaining >= br && e.bonus >= bonus) {
-          return true
-        }
-      }
-      const kept = entries.filter(e => !(tupleNs.lessThanEq(weight, e.weight) && br >= e.burnsRemaining && bonus >= e.bonus))
-      kept.push({weight, burnsRemaining: br, bonus})
-      frontier.set(key, kept)
-    } else {
-      frontier.set(key, [{weight, burnsRemaining: br, bonus}])
-    }
-    return false
-  }
-}
 
-const PATH_ID = Symbol('pathId')
 
-/** @param {PathNode} p */
-function pathId(p) {
-  // @ts-ignore
-  if (p[PATH_ID]) return p[PATH_ID]
-  // Fast, collision-resistant encoding for path state.
-  const id = p.done
-    ? p.node
-    : `s:${p.node}|${p.dir ?? ''}|${p.bonus}|${p.burnsRemaining}|${p.wait ? 1 : 0}`
-  // Cache on the object; symbol property stays non-enumerable in JSON/stringify.
-  Object.defineProperty(p, PATH_ID, {value: id})
-  return id
-}
 
-/** @param {string} fromId */
-function findPath(fromId) {
-  // NB for pathfinding along Hohmanns each
-  // hohmann is kind of like two nodes, one for
-  // each direction. Moving into either node is
-  // free, but switching from one to the other
-  // costs 2 burns (or a turn).
-  //  .
-  //   `-.         ,-'
-  //      `-O.  ,-'
-  //      2 | `-.
-  //       ,O'   `-.
-  //    ,-'         `-
-  // .-'
-  // point: {node: string; dir: string?, id: string}
-  console.time('calculating paths')
 
-  const dominancePrune = makeDominancePrune()
-  const source = /** @type {PathNode} */ ({node: fromId, dir: null, bonus: 0, burnsRemaining: thrust})
-  const pathData = dijkstra(getNeighbors, nodeWeight, tupleNs, pathId, source, allowed, dominancePrune)
 
-  console.timeEnd('calculating paths')
-
-  return pathData
-}
-
-/**
- * @param {PathData} param0
- * @param {string} fromId
- * @param {string} toId
- * @returns {PathNode[]|undefined}
- */
-function drawPath({ distance, previous }, fromId, toId) {
-  const source = /** @type {PathNode} */ ({node: fromId, dir: null, bonus: 0, burnsRemaining: thrust})
-
-  let shorterTo = /** @type {PathNode} */ ({node: toId, dir: null, bonus: 0, done: true})
-  let shorterToId = pathId(shorterTo)
-
-  if (shorterToId in distance) {
-    const path = [shorterTo]
-    let cur = shorterTo
-    while (pathId(cur) !== pathId(source)) {
-      const n = previous[pathId(cur)]
-      path.unshift(n)
-      cur = n
-    }
-
-    return path
-  }
-}
-
-/** @param {PathNode[]|null|undefined} path */
-function pathWeight(path) {
-  /** @type {{burns: number, turns: number, hazards: number, radHazards: number}} */
-  const total = {burns: 0, turns: 0, hazards: 0, radHazards: 0}
-  if (!path) return total
-
-  for (let i = 1; i < path.length; i++) {
-    const edge = edgeWeights(path[i-1], path[i])
-    total.burns += edge.burns
-    total.turns += edge.turns
-    total.hazards += edge.hazards
-    total.radHazards += edge.radHazards
-  }
-  return total
-}
 
 /** @param {MapPoint} p @returns {number|null} */
 function siteSizeValue(p) {
@@ -737,7 +482,6 @@ function isSiteTypeEnabled(p) {
   return enabledSiteTypes.has(type)
 }
 
-const siteTypeOptions = ['C', 'S', 'M', 'V', 'D', 'H']
 const solarSeasonOptions = ['red', 'yellow', 'blue']
 const synodicStrokeColors = {
   red: '#ed1c25',
@@ -745,23 +489,196 @@ const synodicStrokeColors = {
   blue: '#01abef',
 }
 
-/** @typedef {'burns'|'turns'|'hazards'|'radHazards'} MetricKey */
-/** @type {MetricKey[]} */
-let metricPriority = ['burns', 'turns', 'hazards', 'radHazards']
 /** @param {MetricKey[]} order */
 function setMetricPriority(order) {
   if (order.length !== metricPriority.length) return
   if (!order.every(m => metricPriority.includes(m))) return
   if (order.every((m, i) => m === metricPriority[i])) return
   metricPriority = order
+  refreshSearch()
+  solutions = sortSolutions(solutions)
   recomputeHighlightedPath()
   draw()
 }
 
-let isru = 0
-let thrust = 12
-/** @type {Set<string>} */
-let enabledSiteTypes = new Set(siteTypeOptions)
+
+
+let exploring = false
+/** @type {{sourceId: string, targetId: string, solutions: Solution[]}|null} */
+let exploreCache = null
+/** @type {Solution[]} */
+let solutions = []
+/** Set when a setting changed the graph and the cached search can no longer be trusted. */
+let solutionsStale = false
+/** True while a worker search is in flight; `solutions` may be partial. */
+let solutionsComputing = false
+/** @type {Worker|null} */
+let searchWorker = null
+/** Replies carrying an older id are from a superseded request and get dropped. */
+let exploreRequestId = 0
+/** @type {{id: number, sourceId: string, targetId: string}|null} */
+let pendingExplore = null
+/** Path shown on the map while hovering a solution, without committing to it. @type {PathNode[]|null} */
+let previewedPath = null
+
+/** Invalidate cached searches after anything that changes edge weights or reachability. */
+/**
+ * The Explore search runs off the main thread: it can take tens of seconds on a
+ * long route, which would otherwise freeze the page. Returns null if workers are
+ * unavailable, so the caller can fall back to computing inline.
+ * @returns {Worker|null}
+ */
+/** Drop an in-flight search. The worker has no way to be interrupted mid-run, so
+ * the only way to stop it eating the next request is to discard it outright. */
+function cancelSearchWorker() {
+  if (searchWorker) searchWorker.terminate()
+  searchWorker = null
+  pendingExplore = null
+  solutionsComputing = false
+}
+
+function getSearchWorker() {
+  if (searchWorker) return searchWorker
+  if (typeof Worker === 'undefined') return null
+  try {
+    searchWorker = new Worker(new URL('./search.worker.js', import.meta.url))
+  } catch (e) {
+    console.warn('search worker unavailable, falling back to inline search', e)
+    return null
+  }
+  searchWorker.onmessage = (event) => {
+    const {id, done, solutions: found, error} = event.data
+    if (!pendingExplore || id !== pendingExplore.id) return // superseded
+    if (error) console.warn('search worker failed:', error)
+    if (done) {
+      exploreCache = {sourceId: pendingExplore.sourceId, targetId: pendingExplore.targetId, solutions: found}
+      pendingExplore = null
+      solutionsComputing = false
+    }
+    solutions = sortSolutions(found)
+    draw()
+  }
+  return searchWorker
+}
+
+function invalidateExploreCache() {
+  exploreCache = null
+  if (exploring) solutionsStale = true
+}
+
+
+
+
+
+
+/** @param {Solution} a @param {Solution} b @returns {boolean} true if `a` dominates `b` */
+function dominates(a, b) {
+  return ALL_METRICS.every(k => a.weight[k] <= b.weight[k]) && ALL_METRICS.some(k => a.weight[k] < b.weight[k])
+}
+
+/** Present the front in the user's current priority order, dropping anything a
+ * kept solution dominates. @param {Solution[]} front @returns {Solution[]} */
+function sortSolutions(front) {
+  return front
+    .filter(s => !front.some(other => other !== s && dominates(other, s)))
+    .sort((a, b) => {
+      const ka = solutionSortKey(a), kb = solutionSortKey(b)
+      for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i]
+      return 0
+    })
+}
+
+/** @param {Solution} s @returns {number[]} */
+function solutionSortKey(s) {
+  return metricPriority.map(k => s.weight[k])
+}
+
+/**
+ * Refresh the displayed trade-offs for the current path's endpoints. The front
+ * itself does not depend on `metricPriority` — that only sorts it — so a
+ * priority change re-sorts from cache rather than searching again.
+ *
+ * Without `force` this only refreshes from a warm cache: the search is far too
+ * expensive to redo on every tick of the thrust slider, so a cold cache is left
+ * stale for the user to refresh deliberately.
+ * @param {{force?: boolean}} [options]
+ */
+function recomputeSolutions({force = false} = {}) {
+  solutions = []
+  if (!exploring || !highlightedPath) {
+    solutionsStale = false
+    solutionsComputing = false
+    pendingExplore = null
+    return
+  }
+  const fromId = highlightedPath[0].node
+  const toId = highlightedPath[highlightedPath.length - 1].node
+  const warm = exploreCache && exploreCache.sourceId === fromId && exploreCache.targetId === toId
+  if (!warm && !force) {
+    solutionsStale = true
+    solutionsComputing = false
+    pendingExplore = null
+    return
+  }
+  solutionsStale = false
+
+  if (warm) {
+    solutionsComputing = false
+    pendingExplore = null
+    solutions = sortSolutions(/** @type {{solutions: Solution[]}} */ (exploreCache).solutions)
+    return
+  }
+
+  // A superseded search cannot be interrupted, so discard the worker outright
+  // rather than let up to tens of seconds of dead work delay this request.
+  if (pendingExplore) cancelSearchWorker()
+
+  const worker = getSearchWorker()
+  if (!worker) {
+    // No worker available: block, as this used to, rather than lose the feature.
+    exploreCache = {sourceId: fromId, targetId: toId, solutions: search.curateSolutions(search.findSolutions(fromId, toId))}
+    solutions = sortSolutions(exploreCache.solutions)
+    return
+  }
+
+  const id = ++exploreRequestId
+  pendingExplore = {id, sourceId: fromId, targetId: toId}
+  solutionsComputing = true
+  worker.postMessage({
+    id,
+    map: mapData.toJSON(),
+    thrust, solarSeason, metricPriority,
+    fromId, toId,
+  })
+}
+
+
+function toggleExplore() {
+  exploring = !exploring
+  previewedPath = null
+  recomputeSolutions({force: exploring})
+  draw()
+}
+
+function refreshSolutions() {
+  recomputeSolutions({force: true})
+  draw()
+}
+
+/** @param {PathNode[]|null} path */
+function previewSolution(path) {
+  if (previewedPath === path) return
+  previewedPath = path
+  draw()
+}
+
+/** @param {PathNode[]} path */
+function chooseSolution(path) {
+  highlightedPath = path
+  previewedPath = null
+  draw()
+}
+
 /** @param {number} e */
 function setIsru(e) {
   isru = e
@@ -773,6 +690,8 @@ function setThrust(value) {
   const rounded = Math.round(value)
   const clamped = Math.max(1, Math.min(15, rounded))
   thrust = clamped
+  refreshSearch()
+  invalidateExploreCache()
   recomputeHighlightedPath()
 }
 
@@ -790,6 +709,8 @@ function toggleSiteType(type) {
 function setSolarSeason(season) {
   if (!solarSeasonOptions.includes(season)) return
   solarSeason = season
+  refreshSearch()
+  invalidateExploreCache()
   recomputeHighlightedPath()
   draw()
 }
@@ -1061,7 +982,7 @@ function draw() {
           ctx.shadowBlur = 10
           ctx.textBaseline = 'middle'
           ctx.textAlign = 'center'
-          const path = drawPath(pathData, pathOrigin, pId)
+          const path = search.drawPath(pathData, pathOrigin, pId)
           // pathWeight reports zero for a missing path, which is indistinguishable
           // from a genuinely free one, so unreachable sites have to be skipped here
           // rather than filtered out by the label coming back empty.
@@ -1069,7 +990,7 @@ function draw() {
             ctx.restore()
             continue
           }
-          const burns = pathWeight(path).burns ?? 0
+          const burns = search.pathWeight(path).burns ?? 0
           const colors = [
             '#ffffb2',
             '#fecc5c',
@@ -1084,27 +1005,29 @@ function draw() {
       }
     }
   }
-  if (highlightedPath) {
+  // A hovered solution previews on the map without replacing the committed path.
+  const shownPath = previewedPath ?? highlightedPath
+  if (shownPath) {
     ctx.save()
     const highlightedLineWidth = 20
     ctx.lineWidth = highlightedLineWidth
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
     ctx.strokeStyle = 'rgba(214,15,122,0.7)'
-    const p0 = mapData.points[highlightedPath[0].node]
+    const p0 = mapData.points[shownPath[0].node]
     ctx.beginPath()
     ctx.moveTo(p0.x * width, p0.y * height)
     /** @type {MapPoint[]} */
     let segmentPoints = [p0]
     let segmentHasDecorative = false
 
-    for (let i = 1; i < highlightedPath.length; i++) {
-      const currentPoint = mapData.points[highlightedPath[i].node]
+    for (let i = 1; i < shownPath.length; i++) {
+      const currentPoint = mapData.points[shownPath[i].node]
       segmentPoints.push(currentPoint)
       segmentHasDecorative = segmentHasDecorative || currentPoint.type === 'decorative'
 
       const isAnchor = currentPoint.type !== 'decorative'
-      const isLast = i === highlightedPath.length - 1
+      const isLast = i === shownPath.length - 1
       if (isAnchor || isLast) {
         if (segmentPoints.length > 1) {
           if (!segmentHasDecorative && segmentPoints.length === 2) {
@@ -1123,13 +1046,13 @@ function draw() {
     ctx.save()
     ctx.lineWidth = 4
     ctx.strokeStyle = 'rgba(255,255,255,0.8)'
-    for (let i = 1; i < highlightedPath.length - 1; i++) {
-      const p = highlightedPath[i]
-      const next = highlightedPath[i + 1]
-      if (turnWeight(p, next) > 0) {
-        const { node: prevId } = highlightedPath[i - 1]
+    for (let i = 1; i < shownPath.length - 1; i++) {
+      const p = shownPath[i]
+      const next = shownPath[i + 1]
+      if (search.turnWeight(p, next) > 0) {
+        const { node: prevId } = shownPath[i - 1]
         const { node: pId } = p
-        const nextDifferentNode = highlightedPath.slice(i + 1).find(p => p.node !== pId)
+        const nextDifferentNode = shownPath.slice(i + 1).find(p => p.node !== pId)
         if (!nextDifferentNode) continue
         const nextP = mapData.points[nextDifferentNode.node]
         const prevP = mapData.points[prevId]
@@ -1145,8 +1068,8 @@ function draw() {
     }
     ctx.restore()
   }
-  const weight = pathWeight(highlightedPath)
-  ReactDOM.render(React.createElement(Overlay, {mapData, path: highlightedPath, weight, metricPriority, setMetricPriority, cancelPath: () => { cancelPathSelection(); draw() }, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}), overlay)
+  const weight = search.pathWeight(highlightedPath)
+  ReactDOM.render(React.createElement(Overlay, {mapData, path: highlightedPath, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsStale, solutionsComputing, refreshSolutions, previewSolution, chooseSolution, cancelPath: () => { cancelPathSelection(); draw() }, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}), overlay)
 }
 
 /** @param {number} burns */
@@ -1234,4 +1157,25 @@ function pauseMarkerSpan(prev, curr, next, lineWidth, width, height) {
 
   if (pos === 0 && neg === 0) return null
   return { dir, pos, neg }
+}
+
+// Debug handle for benchmarking and console poking, in the same spirit as
+// `window.highlightedPath` above.
+// @ts-ignore
+window.planner = {
+  get mapData() { return mapData },
+  get metricPriority() { return metricPriority },
+  get thrust() { return thrust },
+  setThrust: (/** @type {number} */ n) => { thrust = n; refreshSearch() },
+  get search() { return search },
+  get solutions() { return solutions },
+  get solutionsComputing() { return solutionsComputing },
+  /** Set up and kick off an Explore for a pair of nodes, as clicking would. */
+  explore: (/** @type {string} */ fromId, /** @type {string} */ toId) => {
+    highlightedPath = search.drawPath(search.findPath(fromId), fromId, toId) ?? null
+    exploring = true
+    exploreCache = null
+    recomputeSolutions({force: true})
+    return !!highlightedPath
+  },
 }

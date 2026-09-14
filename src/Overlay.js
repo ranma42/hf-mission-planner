@@ -5,8 +5,6 @@ const e = React.createElement
 /** @param {number} n @param {string} sg @param {string} pl */
 const pl = (n, sg, pl) => n === 1 ? `${n} ${sg}` : `${n} ${pl}`
 
-/** @typedef {'burns'|'turns'|'hazards'|'radHazards'} MetricKey */
-
 /** @typedef {import('./MapData').MapData} MapData */
 
 /** @param {MetricKey[]} order @param {MetricKey} key @param {MetricKey} target @returns {MetricKey[]} */
@@ -19,8 +17,57 @@ function moveMetricTo(order, key, target) {
   return next
 }
 
-/** @param {{mapData: MapData, path: PathNode[]|null, weight: {burns: number, turns: number, hazards: number, radHazards: number}, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, cancelPath: () => void}} props */
-function PathInfo({mapData, path, weight, metricPriority, setMetricPriority, cancelPath}) {
+/** @typedef {{weight: MetricWeights, path: PathNode[]}} Solution */
+
+const metricMeta = {
+  burns: {sg: 'burn', pl: 'burns', abbr: 'B'},
+  turns: {sg: 'turn', pl: 'turns', abbr: 'T'},
+  hazards: {sg: 'hazard', pl: 'hazards', abbr: 'H'},
+  radHazards: {sg: 'rad hazard', pl: 'rad hazards', abbr: 'R'},
+}
+
+/** @param {{metrics: MetricKey[], solutions: Solution[], solutionsStale: boolean, solutionsComputing: boolean, refreshSolutions: () => void, weight: MetricWeights, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void}} props */
+function SolutionList({metrics, solutions, solutionsStale, solutionsComputing, refreshSolutions, weight, previewSolution, chooseSolution}) {
+  if (solutionsStale) return e('button', {
+    type: 'button',
+    className: 'PathInfo-exploreButton',
+    onClick: refreshSolutions,
+  }, 'Refresh alternatives')
+  if (!solutions.length) return e('div', {className: 'PathInfo-empty'},
+    solutionsComputing ? 'Searching…' : 'No alternatives found')
+
+  return e('div', {
+    className: 'PathInfo-solutions',
+    onMouseLeave: () => previewSolution(null),
+  },
+    solutionsComputing ? e('div', {className: 'PathInfo-searching'}, 'Searching… best so far') : null,
+    e('div', {className: 'PathInfo-solutionRow PathInfo-solutionHeader'},
+      metrics.map(key =>
+        e('span', {key, className: 'PathInfo-solutionCell', title: metricMeta[key].pl}, metricMeta[key].abbr)
+      )
+    ),
+    solutions.map((solution, i) => {
+      const current = metrics.every(key => solution.weight[key] === weight[key])
+      return e('button', {
+        key: i,
+        type: 'button',
+        className: 'PathInfo-solutionRow PathInfo-solutionButton' + (current ? ' selected' : ''),
+        'aria-pressed': current,
+        title: metrics.map(key => pl(solution.weight[key], metricMeta[key].sg, metricMeta[key].pl)).join(', '),
+        onMouseEnter: () => previewSolution(solution.path),
+        onFocus: () => previewSolution(solution.path),
+        onClick: () => chooseSolution(solution.path),
+      },
+        metrics.map(key =>
+          e('span', {key, className: 'PathInfo-solutionCell'}, String(solution.weight[key]))
+        )
+      )
+    })
+  )
+}
+
+/** @param {{mapData: MapData, path: PathNode[]|null, weight: MetricWeights, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, exploring: boolean, toggleExplore: () => void, solutions: Solution[], solutionsStale: boolean, solutionsComputing: boolean, refreshSolutions: () => void, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void, cancelPath: () => void}} props */
+function PathInfo({mapData, path, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsStale, solutionsComputing, refreshSolutions, previewSolution, chooseSolution, cancelPath}) {
   /** @type {[{key: MetricKey, order: MetricKey[]}|null, (drag: {key: MetricKey, order: MetricKey[]}|null) => void]} */
   const [drag, setDrag] = React.useState(null)
 
@@ -29,23 +76,15 @@ function PathInfo({mapData, path, weight, metricPriority, setMetricPriority, can
   const sourcePoint = path ? mapData.points[path[0].node] : null
   const destinationPoint = path ? mapData.points[path[path.length - 1].node] : null
 
-  const metricMeta = {
-    burns: {sg: 'burn', pl: 'burns'},
-    turns: {sg: 'turn', pl: 'turns'},
-    hazards: {sg: 'hazard', pl: 'hazards'},
-    radHazards: {sg: 'rad hazard', pl: 'rad hazards'},
-  }
   // While dragging, show the previewed order; commit it only on drop.
   const displayOrder = drag ? drag.order : metricPriority
 
-  /** @param {MetricKey} key @param {number} delta */
+  /** Swap with the neighbouring *visible* metric, stepping over hidden ones.
+   * @param {MetricKey} key @param {number} delta */
   const moveBy = (key, delta) => {
-    const from = metricPriority.indexOf(key)
-    const to = from + delta
-    if (from < 0 || to < 0 || to >= metricPriority.length) return
-    const next = [...metricPriority]
-    next.splice(to, 0, ...next.splice(from, 1))
-    setMetricPriority(next)
+    const target = displayOrder[displayOrder.indexOf(key) + delta]
+    if (!target) return
+    setMetricPriority(moveMetricTo(metricPriority, key, target))
   }
 
   /** @param {React.DragEvent} ev @param {MetricKey} key */
@@ -59,7 +98,7 @@ function PathInfo({mapData, path, weight, metricPriority, setMetricPriority, can
   }
 
   return e('div', {className: 'PathInfo'},
-    displayOrder.map((key, i) => {
+    exploring ? e(SolutionList, {metrics: displayOrder, solutions, solutionsStale, solutionsComputing, refreshSolutions, weight, previewSolution, chooseSolution}) : displayOrder.map((key, i) => {
       const {sg, pl: plural} = metricMeta[key]
       return e('div', {
         key,
@@ -112,6 +151,12 @@ function PathInfo({mapData, path, weight, metricPriority, setMetricPriority, can
         onClick: cancelPath,
       }, '\u2715'),
     ),
+    e('button', {
+      type: 'button',
+      className: 'PathInfo-exploreButton' + (exploring ? ' selected' : ''),
+      'aria-pressed': exploring,
+      onClick: toggleExplore,
+    }, exploring ? '\u2190 Priorities' : 'Explore alternatives'),
   )
 }
 
@@ -210,10 +255,10 @@ function VehicleInfo({isru, setIsru, thrust, setThrust, enabledSiteTypes, toggle
   )
 }
 
-/** @param {{mapData: MapData, path: PathNode[]|null, weight: {burns: number, turns: number, hazards: number, radHazards: number}, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, cancelPath: () => void, isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} props */
-export function Overlay({mapData, path, weight, metricPriority, setMetricPriority, cancelPath, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
+/** @param {{mapData: MapData, path: PathNode[]|null, weight: MetricWeights, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, exploring: boolean, toggleExplore: () => void, solutions: Solution[], solutionsStale: boolean, solutionsComputing: boolean, refreshSolutions: () => void, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void, cancelPath: () => void, isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} props */
+export function Overlay({mapData, path, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsStale, solutionsComputing, refreshSolutions, previewSolution, chooseSolution, cancelPath, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
   return e(React.Fragment, null,
-    e(PathInfo, {mapData, path, weight, metricPriority, setMetricPriority, cancelPath}),
+    e(PathInfo, {mapData, path, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsStale, solutionsComputing, refreshSolutions, previewSolution, chooseSolution, cancelPath}),
     e(VehicleInfo, {isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}),
   )
 }

@@ -10,9 +10,12 @@ import Heap from './heap'
  * @param {Node} source
  * @param {(u: Node, v: Node, id: (node: Node) => string, previous: Record<string, Node>) => boolean} allowed
  * @param {(node: Node, weight: Weight) => boolean} [prune]
+ * @param {string} [targetId] stop once this node is settled; its distance and
+ *   the predecessors along its path are final at that point, so callers that
+ *   only need one destination can skip exploring the rest of the graph.
  * @returns {{distance: Record<string, Weight>, previous: Record<string, Node>}}
  */
-export function dijkstra(getNeighbors, weight, {zero, add, lessThan}, id, source, allowed, prune = () => false) {
+export function dijkstra(getNeighbors, weight, {zero, add, lessThan}, id, source, allowed, prune = () => false, targetId = undefined) {
   /** @type {Record<string, Weight>} */
   const distance = {}
   /** @type {Record<string, Node>} */
@@ -30,6 +33,7 @@ export function dijkstra(getNeighbors, weight, {zero, add, lessThan}, id, source
     if (distance[idu] !== undefined && lessThan(distance[idu], entry.getKey())) {
       continue
     }
+    if (idu === targetId) break
 
     for (const v of getNeighbors(u)) {
       if (!allowed(u, v, id, previous)) continue

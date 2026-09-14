@@ -38,6 +38,12 @@ canvas { display: block; }
   gap: 8px;
   pointer-events: auto;
   max-width: 260px;
+  /* The alternatives list is unbounded, and the overlay stacks this above the
+     vehicle controls: without room to shrink, a long list pushed them off the
+     bottom of the screen. Shrink instead, and scroll the list inside. */
+  min-height: 0;
+  max-height: 100%;
+  box-sizing: border-box;
 }
 .PathInfo-row {
   display: flex;
@@ -88,6 +94,76 @@ canvas { display: block; }
 .PathInfo-priorityButton:not(:disabled):active {
   transform: translateY(1px);
 }
+.PathInfo-solutions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Scrolls when the list outgrows the panel, rather than growing the panel and
+     pushing the vehicle controls off the screen. */
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
+}
+.PathInfo-solutionRow {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  text-align: center;
+  font-family: inherit;
+}
+.PathInfo-solutionCell {
+  flex: 1 1 0;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.PathInfo-solutionHeader {
+  font-size: 12px;
+  opacity: 0.6;
+  letter-spacing: 1px;
+  padding: 0 6px;
+}
+.PathInfo-solutionButton {
+  color: white;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  font-size: 18px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.PathInfo-solutionButton:hover,
+.PathInfo-solutionButton:focus-visible {
+  background: rgba(214, 15, 122, 0.5);
+  border-color: white;
+  outline: none;
+}
+.PathInfo-solutionButton.selected {
+  border-color: white;
+  background: rgba(255, 255, 255, 0.2);
+}
+.PathInfo-searching {
+  font-size: 12px;
+  opacity: 0.7;
+  font-style: italic;
+}
+.PathInfo-empty {
+  font-size: 14px;
+  opacity: 0.6;
+}
+.PathInfo-exploreButton {
+  color: white;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 6px;
+  cursor: pointer;
+}
+.PathInfo-exploreButton:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
 .PathInfo-destinationRow {
   align-self: flex-start;
   justify-self: flex-start;
@@ -114,6 +190,11 @@ canvas { display: block; }
 }
 
 .VehicleInfo {
+  /* Open, the controls are taller than a phone in landscape, so cap the panel
+     and scroll its body rather than letting it run off the screen. */
+  max-height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
   color: white;
   font-size: 18px;
   font-family: sans-serif;
@@ -167,6 +248,8 @@ canvas { display: block; }
   flex-direction: column;
   gap: 12px;
   margin-top: 10px;
+  overflow-y: auto;
+  min-height: 0;
 }
 .VehicleInfo:not([open]) .vehicle-info-title {
   display: none;
@@ -181,6 +264,17 @@ canvas { display: block; }
 @media (min-width: 721px) {
   .VehicleInfo:not([open]) summary {
     padding: 6px 12px;
+  }
+  /* Stacked here, so when the two do not both fit the alternatives list is the
+     one that gives way -- it scrolls, the controls do not reflow. The controls
+     still yield once the list has nothing left to give, which is what keeps them
+     on screen on a phone held sideways. Only in this layout: side by side,
+     shrinking works across the other axis and would squash the panels. */
+  .PathInfo {
+    flex-shrink: 100;
+  }
+  .VehicleInfo {
+    flex-shrink: 1;
   }
 }
 
@@ -277,9 +371,13 @@ canvas { display: block; }
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 .VehicleInfo input[type="range"] {
   flex: 1;
+  /* Inputs floor at their intrinsic width, so `flex: 1` alone could not shrink
+     this and the row overflowed the panel sideways. */
+  min-width: 0;
   -webkit-appearance: none;
   appearance: none;
   height: 28px;
@@ -360,10 +458,13 @@ canvas { display: block; }
     right: 0;
   }
 
+  /* Flex items floor at their content width unless told otherwise, so both
+     panels ignored the width above and the second one ran off the screen. */
   .VehicleInfo {
     order: -1;
     align-self: flex-start;
     width: min(260px, calc(50vw - 16px));
+    min-width: 0;
     border: 4px solid white;
     border-radius: 8px;
   }
@@ -371,7 +472,13 @@ canvas { display: block; }
   .PathInfo {
     align-self: flex-start;
     width: min(260px, calc(50vw - 16px));
+    min-width: 0;
     border: 4px solid white;
     border-radius: 8px;
+  }
+
+  /* "Yellow" does not fit a third of the panel at the full size. */
+  .VehicleInfo .solar-season-button {
+    font-size: 15px;
   }
 }
