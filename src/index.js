@@ -7,6 +7,7 @@ import './index.css'
 import HFMap from '../assets/hf.png'
 import HF4Map from '../assets/hf4.jpg'
 import { createSearch, ALL_METRICS } from './search'
+import { formatBurns } from './format'
 import { Overlay } from './Overlay'
 import { MapData } from './MapData'
 import { createPanMomentum } from './panMomentum'
@@ -1136,16 +1137,6 @@ function draw() {
   ReactDOM.render(React.createElement(Overlay, {mapData, path: highlightedPath, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath: () => { cancelPathSelection(); draw() }, isru, setIsru, thrust, setThrust, pivots, setPivots, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}), overlay)
 }
 
-
-/** @param {number} burns */
-function formatBurns(burns) {
-  const wholeBurns = Math.floor(burns)
-  const halfBurns = burns - wholeBurns
-  // A site reachable for free still needs a marker: an empty label would hide it
-  // entirely, which reads as "not reachable" rather than "costs nothing".
-  if (wholeBurns === 0 && halfBurns === 0) return '0'
-  return `${wholeBurns > 0 ? wholeBurns : ''}${halfBurns > 0 ? '½' : ''}`
-}
 
 /**
  * @param {MapPoint} prev

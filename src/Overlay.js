@@ -1,4 +1,5 @@
 import React from 'react'
+import { formatMetric } from './format'
 
 const e = React.createElement
 
@@ -31,8 +32,15 @@ function SolutionList({metrics, solutions, solutionsComputing, weight, previewSo
   if (!solutions.length) return e('div', {className: 'PathInfo-empty'},
     solutionsComputing ? 'Searching…' : 'No alternatives found')
 
+  // Each row is its own flex container, so without a shared width a wide figure
+  // widens only its own row and the columns go ragged. Size every cell to the
+  // widest value in the table instead.
+  const widest = solutions.reduce((max, s) =>
+    metrics.reduce((m, key) => Math.max(m, formatMetric(key, s.weight[key]).length), max), 2)
+
   return e('div', {
     className: 'PathInfo-solutions',
+    style: {'--solution-cell': `${widest + 0.3}ch`},
     onMouseLeave: () => previewSolution(null),
   },
     solutionsComputing ? e('div', {className: 'PathInfo-searching'}, 'Searching… best so far') : null,
@@ -54,7 +62,7 @@ function SolutionList({metrics, solutions, solutionsComputing, weight, previewSo
         onClick: () => chooseSolution(solution.path),
       },
         metrics.map(key =>
-          e('span', {key, className: 'PathInfo-solutionCell'}, String(solution.weight[key]))
+          e('span', {key, className: 'PathInfo-solutionCell'}, formatMetric(key, solution.weight[key]))
         )
       )
     })
