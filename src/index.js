@@ -65,8 +65,31 @@ let highlightedPath = null
 let solarSeason = 'red'
 /** @type {string|null} */
 let pathOrigin = null
-/** @type {PathData|null} */
-let pathData = null
+/** Burns from `pathOrigin` to each site, for the labels on the map. A site no
+ * route reaches is absent, which is what tells it apart from one reached for
+ * nothing. @type {Record<string, number>|null} */
+let siteBurns = null
+/** Origin the burns in `siteBurns` were measured from. A change to the vehicle
+ * leaves the old labels up while the new ones are computed — stale for a moment
+ * beats the map going blank every time the thrust slider moves — but a change of
+ * origin cannot, so the two are tracked together. @type {string|null} */
+let siteBurnsOrigin = null
+/** Routes already read out of the current path search, by destination; `null`
+ * where the search found none. @type {Map<string, PathNode[]|null>} */
+const routeCache = new Map
+/** The node whose route belongs on screen. Its route may still be in flight.
+ * @type {string|null} */
+let desiredDestination = null
+/** Identifies the current path search; replies from superseded ones are dropped. */
+let pathRequestId = 0
+/** True from asking for a path search until its reply. */
+let pathComputing = false
+/** Held here only when there is no worker to hold it. @type {PathData|null} */
+let localPathData = null
+/** @type {Worker|null} */
+let pathWorker = null
+/** Pending debounced path search; bursts of changes collapse into one run. */
+let pathTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null)
 
 const siteTypeOptions = ['C', 'S', 'M', 'V', 'D', 'H']
 /** @type {MetricKey[]} */
@@ -97,7 +120,9 @@ function cancelPathSelection() {
   previewedPath = null
   exploring = false
   solutions = []
+  desiredDestination = null
   cancelSearchWorker()
+  cancelPathWorker()
 }
 
 /** @param {MapDataJSON} json */
@@ -177,7 +202,7 @@ canvas.onclick = e => {
     if (!closestId) { return }
 
     if (canPath(closestId)) {
-      highlightedPath = search.drawPath(pathData, pathOrigin, closestId)
+      showRoute(/** @type {string} */ (closestId))
       // @ts-ignore
       window.highlightedPath = highlightedPath
       endPathing()
@@ -195,7 +220,87 @@ canvas.onclick = e => {
 function beginPathing(originId) {
   pathOrigin = originId
   highlightedPath = null
-  pathData = search.findPath(originId)
+  desiredDestination = null
+  requestPathSearch(originId)
+}
+
+/**
+ * Start a fresh path search from `originId`, discarding whatever the last one
+ * cached. It runs in a worker: it settles every state reachable from the origin,
+ * which is over a second once a vehicle has pivots, and it is re-run on every
+ * change to thrust, fuel or pivots.
+ * @param {string} originId
+ */
+function requestPathSearch(originId) {
+  pathRequestId++
+  routeCache.clear()
+  localPathData = null
+  if (originId !== siteBurnsOrigin) {
+    siteBurns = null
+    siteBurnsOrigin = null
+  }
+
+  // A search already running is for a vehicle that no longer exists, and cannot
+  // be interrupted, so discard it rather than let it delay this one.
+  cancelPathWorker()
+  const worker = getPathWorker()
+  if (!worker) {
+    computePathInline(originId)
+    return
+  }
+  pathComputing = true
+  worker.postMessage({
+    type: 'path',
+    id: pathRequestId,
+    map: mapData.toJSON(),
+    thrust, pivots, fuelNum, fuelDen, solarSeason, metricPriority,
+    fromId: originId,
+  })
+}
+
+/** No worker available: block, as this used to, rather than lose the labels.
+ * @param {string} originId */
+function computePathInline(originId) {
+  localPathData = search.findPath(originId)
+  /** @type {Record<string, number>} */
+  const burns = {}
+  for (const nodeId of Object.keys(mapData.points)) {
+    if (nodeId === originId || mapData.points[nodeId].type !== 'site') continue
+    const path = search.drawPath(localPathData, originId, nodeId)
+    if (path) burns[nodeId] = search.pathWeight(path).burns
+  }
+  siteBurns = burns
+  siteBurnsOrigin = originId
+  if (desiredDestination) showRoute(desiredDestination)
+}
+
+/** Ask the worker for one route out of the current search. @param {string} toId */
+function requestRoute(toId) {
+  // While the search itself is running there is nothing to read yet; its reply
+  // asks again for whichever destination is still wanted.
+  if (!pathWorker || pathComputing || routeCache.has(toId)) return
+  pathWorker.postMessage({type: 'route', id: pathRequestId, toId})
+}
+
+/** The route to `toId`, or undefined while it is still being fetched.
+ * @param {string} toId @returns {PathNode[]|null|undefined} */
+function routeTo(toId) {
+  if (routeCache.has(toId)) return routeCache.get(toId)
+  if (localPathData && pathOrigin) {
+    const path = search.drawPath(localPathData, pathOrigin, toId) ?? null
+    routeCache.set(toId, path)
+    return path
+  }
+  requestRoute(toId)
+  return undefined
+}
+
+/** Put the route to `toId` on screen, fetching it if it is not already known.
+ * @param {string} toId */
+function showRoute(toId) {
+  desiredDestination = toId
+  const route = routeTo(toId)
+  if (route !== undefined) highlightedPath = route
 }
 
 /** @param {string|null|undefined} closestId */
@@ -205,33 +310,52 @@ function canPath(closestId) {
 
 function endPathing() {
   pathOrigin = null
-  pathData = null
+  // The labels are only drawn while picking a destination. The worker and the
+  // routes it has already answered stay: the click that ends pathing may still
+  // be waiting on one.
+  siteBurns = null
+  siteBurnsOrigin = null
 }
 
 function recomputeHighlightedPath() {
   const source = pathOrigin ?? highlightedPath?.[0].node
   if (source) {
-    pathData = search.findPath(source)
-    const pathDestination = highlightedPath?.[highlightedPath.length - 1].node
-    if (pathDestination)
-      highlightedPath = search.drawPath(pathData, source, pathDestination)
+    // The destination outlives the vehicle it was chosen for, so it is asked for
+    // again once the new search replies. The old route stays on screen until
+    // then rather than the map going blank for the length of a search.
+    desiredDestination = highlightedPath?.[highlightedPath.length - 1].node ?? null
     previewedPath = null
+    requestPathSearch(source)
     recomputeSolutions()
     draw()
   }
 }
 
+/**
+ * Recompute the path once the input settles. The thrust slider fires
+ * continuously and a search takes over a second on a vehicle with pivots, so
+ * coalesce the burst rather than queueing one search per event behind the
+ * worker.
+ * @param {number} [delay]
+ */
+function schedulePathRecompute(delay = 250) {
+  if (pathTimer !== null) clearTimeout(pathTimer)
+  pathTimer = setTimeout(() => {
+    pathTimer = null
+    recomputeHighlightedPath()
+  }, delay)
+}
+
 function refreshPath() {
-  if (pathOrigin && pathData) {
+  if (pathOrigin) {
     const closestId = nearestPoint(mousePos.x, mousePos.y, id => mapData.points[id].type !== 'decorative')
 
     if (canPath(closestId)) {
-      const previousDestination = highlightedPath?.[highlightedPath.length - 1].node
-      highlightedPath = search.drawPath(pathData, pathOrigin, closestId)
-      const destination = highlightedPath?.[highlightedPath.length - 1].node
+      const previousDestination = desiredDestination
+      showRoute(/** @type {string} */ (closestId))
       // Follow the pointer while exploring, but only once it settles on a new
       // node — a search per mousemove would be all cancellation and no results.
-      if (exploring && destination && destination !== previousDestination) scheduleSolutions()
+      if (exploring && closestId !== previousDestination) scheduleSolutions()
     }
   }
 }
@@ -535,7 +659,7 @@ function setMetricPriority(order) {
   metricPriority = order
   refreshSearch()
   solutions = sortSolutions(solutions)
-  recomputeHighlightedPath()
+  schedulePathRecompute()
   draw()
 }
 
@@ -606,6 +730,54 @@ function getSearchWorker() {
     draw()
   }
   return searchWorker
+}
+
+/** Drop the path search. Its `pathData` is megabytes, so letting go of the
+ * worker is also how that memory is released. */
+function cancelPathWorker() {
+  if (pathWorker) pathWorker.terminate()
+  pathWorker = null
+  pathComputing = false
+}
+
+/**
+ * The path search runs off the main thread for the same reason Explore does: it
+ * settles every state reachable from the origin, which is over a second once a
+ * vehicle has pivots. It gets a worker of its own because Explore's is discarded
+ * and rebuilt whenever the pointer settles somewhere new.
+ * @returns {Worker|null}
+ */
+function getPathWorker() {
+  if (pathWorker) return pathWorker
+  if (typeof Worker === 'undefined') return null
+  try {
+    pathWorker = new Worker(new URL('./search.worker.js', import.meta.url))
+  } catch (e) {
+    console.warn('path worker unavailable, falling back to inline search', e)
+    return null
+  }
+  pathWorker.onmessage = (event) => {
+    const {type, id, fromId, toId, path, siteBurns: burns, error} = event.data
+    if (id !== pathRequestId) return // superseded
+    if (error) console.warn('path worker failed:', error)
+
+    if (type === 'path') {
+      siteBurns = burns
+      siteBurnsOrigin = fromId
+      pathComputing = false
+      // Asked for again here rather than when the vehicle changed: there was
+      // nothing to read it out of until now.
+      if (desiredDestination) requestRoute(desiredDestination)
+    } else if (type === 'route') {
+      routeCache.set(toId, path ?? null)
+      if (toId === desiredDestination) {
+        highlightedPath = path ?? null
+        if (exploring) scheduleSolutions()
+      }
+    }
+    draw()
+  }
+  return pathWorker
 }
 
 /** @param {string} sourceId @param {string} targetId @param {Solution[]} found */
@@ -706,6 +878,7 @@ function recomputeSolutions() {
   pendingExplore = {id, sourceId: fromId, targetId: toId}
   solutionsComputing = true
   worker.postMessage({
+    type: 'solutions',
     id,
     map: mapData.toJSON(),
     thrust, pivots, fuelNum, fuelDen, solarSeason, metricPriority,
@@ -751,7 +924,7 @@ function setPivots(value) {
   pivots = clamped
   refreshSearch()
   invalidateExploreCache()
-  recomputeHighlightedPath()
+  schedulePathRecompute()
   draw()
 }
 
@@ -762,7 +935,7 @@ function setFuelNum(num) {
   fuelNum = clamped
   refreshSearch()
   invalidateExploreCache()
-  recomputeHighlightedPath()
+  schedulePathRecompute()
   draw()
 }
 
@@ -773,7 +946,7 @@ function setFuelDen(den) {
   fuelDen = clamped
   refreshSearch()
   invalidateExploreCache()
-  recomputeHighlightedPath()
+  schedulePathRecompute()
   draw()
 }
 
@@ -784,7 +957,8 @@ function setThrust(value) {
   thrust = clamped
   refreshSearch()
   invalidateExploreCache()
-  recomputeHighlightedPath()
+  schedulePathRecompute()
+  draw()
 }
 
 /** @param {string} type */
@@ -803,7 +977,7 @@ function setSolarSeason(season) {
   solarSeason = season
   refreshSearch()
   invalidateExploreCache()
-  recomputeHighlightedPath()
+  schedulePathRecompute()
   draw()
 }
 
@@ -1074,15 +1248,14 @@ function draw() {
           ctx.shadowBlur = 10
           ctx.textBaseline = 'middle'
           ctx.textAlign = 'center'
-          const path = search.drawPath(pathData, pathOrigin, pId)
-          // pathWeight reports zero for a missing path, which is indistinguishable
-          // from a genuinely free one, so unreachable sites have to be skipped here
-          // rather than filtered out by the label coming back empty.
-          if (!path) {
+          // A site no route reaches is left out of siteBurns rather than given a
+          // zero, because zero is a real answer here and an empty label reads as
+          // "not reachable" either way.
+          const burns = siteBurns?.[pId]
+          if (burns === undefined) {
             ctx.restore()
             continue
           }
-          const burns = search.pathWeight(path).burns ?? 0
           const colors = [
             '#ffffb2',
             '#fecc5c',
@@ -1266,6 +1439,8 @@ window.planner = {
   exploreTargetId: () => pendingExplore?.targetId ?? null,
   exploreCachedTargets: () => [...(exploreCache?.byTarget.keys() ?? [])],
   get solutionsComputing() { return solutionsComputing },
+  /** True while the path search is in flight; it no longer runs inline. */
+  get pathComputing() { return pathComputing },
   /** Set up and kick off an Explore for a pair of nodes, as clicking would. */
   explore: (/** @type {string} */ fromId, /** @type {string} */ toId, /** @type {boolean} */ cold = false) => {
     highlightedPath = search.drawPath(search.findPath(fromId), fromId, toId) ?? null
