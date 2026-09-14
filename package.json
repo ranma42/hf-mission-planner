@@ -12,14 +12,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nornagon/hf-mission-planner.git"
+    "url": "git+https://github.com/ranma42/hf-mission-planner.git"
   },
   "author": "Jeremy Apthorp <nornagon@nornagon.net>",
   "license": "AGPL-3.0-only",
   "bugs": {
-    "url": "https://github.com/nornagon/hf-mission-planner/issues"
+    "url": "https://github.com/ranma42/hf-mission-planner/issues"
   },
-  "homepage": "https://github.com/nornagon/hf-mission-planner#readme",
+  "homepage": "https://github.com/ranma42/hf-mission-planner#readme",
   "dependencies": {
     "closure-heap": "^1.0.0",
     "d3-zoom": "^3.0.0",

@@ -2,16 +2,48 @@
 
 This is a ~cheating tool~ mission planner for the board game [High Frontier](https://boardgamegeek.com/boardgame/281655/high-frontier-4-all). It can help you to find the best route from one place in the solar system to another. It's built in the browser, so there's nothing to download or install.
 
-[☞ **Open HF Mission Planner (4th Ed.)**](https://nornagon.github.io/hf-mission-planner)
+[☞ **Open HF Mission Planner (4th Ed.)**](https://ranma42.github.io/hf-mission-planner)
 
-[☞ **Open HF Mission Planner (3rd Ed.)**](https://nornagon.github.io/hf-mission-planner?ed=3)
+[☞ **Open HF Mission Planner (3rd Ed.)**](https://ranma42.github.io/hf-mission-planner?ed=3)
 
 For example, this trajectory from LEO to the Sol-Oort exit takes 18 burns, 32 turns, and takes your spacecraft through 2 hazard zone-equivalents (a Saturn ring crossing, and several radiation hazard zones)
 ![Example trajectory from LEO to the Sol-Oort exit](docs/example-trajectory.png)
 
+## About this fork
+
+The planner is [nornagon/hf-mission-planner](https://github.com/nornagon/hf-mission-planner), and almost all of it is still that: the map, the editor, the search and this README started there. Upstream's own deployment is at [nornagon.github.io/hf-mission-planner](https://nornagon.github.io/hf-mission-planner), and is the one to use if you want the tool without any of what follows.
+
+Modelling fuel at all is an idea taken from [LaertesKrabs/hf-mission-planner](https://github.com/LaertesKrabs/hf-mission-planner), where [afrind](https://github.com/afrind) added a fuel model alongside free pivots and per-metric constraints in [#1](https://github.com/LaertesKrabs/hf-mission-planner/pull/1). What is here is a different design for the same idea. There, fuel joins burns as a fifth thing to minimise; here, thrust goes back to being the per-turn allowance it always was, fuel becomes the thing actually worth spending less of, and burns are reported rather than optimised.
+
+On top of upstream, this fork adds:
+
+- **Fuel**, as the quantity routes are chosen to save.
+- **Pivots**, as a per-turn allowance of free direction changes.
+- **Explore**, which finds every worthwhile compromise between two points in one search rather than the single route your current ranking happens to prefer.
+- **Priorities you can drag**, and burns and pivots reported alongside them.
+- **Offline use**, via a service worker, so the planner keeps working at a table with no signal.
+
 ## Usage
 
 The tool will load with the view over Earth, where the air is free and the breathing is easy. You can zoom the view with the scroll wheel, and pan by clicking and dragging. To plan a path from one place to another, click the point you want to start from, and the point you wish to end up at. Information about the planned trajectory is shown in the top-right corner. Press <kbd>Esc</kbd> to clear the current trajectory (or just click on a new starting point to plan your next path).
+
+Once you have picked a starting point, every site is labelled with what it costs to reach, so you can see where a vehicle can get before committing to a destination.
+
+### Your vehicle
+
+The **Vehicle Info** panel describes what is being routed. Changing any of it re-plans the current trajectory.
+
+- **Thrust** — the most burns the drive can make in a single turn.
+- **Fuel per Burn** — tanks drawn per burn, as a fraction. A part-used tank is spent in full, and the rounding happens once per turn rather than once per burn, so packing burns into fewer turns is worth doing: at 1/3, three burns in one turn cost one tank, but the same three spread over three turns cost three. Set the first field to 0 for a drive that burns nothing and is limited only by its thrust.
+- **Pivots** — direction changes through a Hohmann the drive can make each turn without spending the 2 burns they normally cost.
+- **Solar Season** — which sunspot phase it is, which decides which synodic sites are open and whether the Venus flyby is available.
+- **Site Hydration** and **Spectral Type** — which sites are worth labelling on the map.
+
+### Comparing routes
+
+Routes are ranked by fuel, then turns, then hazards, then radiation hazards. Drag those rows into the order you care about, or use the arrows. Burns and pivots are listed below them as read-outs: they follow from a route rather than being things to trade off against one another, so they are counted and shown but never optimised.
+
+**Explore alternatives** replaces that list with every route that is best under *some* ordering of the four, not just the one your current ranking picks — so you can see what a turn is worth in fuel before deciding. Hover a row to preview that route on the map, and click it to keep it.
 
 ### Edit mode
 
@@ -25,26 +57,23 @@ If you're developing this tool you might want to edit the map data to fix errors
 - <kbd>L</kbd> - mark hovered node as Lagrange type.
 - <kbd>B</kbd> - mark hovered node as Burn type. Pressing <kbd>B</kbd> again will cycle through Lander burn, Half-lander burn and regular burn.
 - <kbd>R</kbd> - mark hovered node as Radhaz type.
-- <kbd>S</kbd> - mark hovered node as Site type. You will be prompted for the name of the site. Pressing <kbd>S</kbd> again will allow you to edit the name of the site.
+- <kbd>S</kbd> - mark hovered node as Site type. You will be prompted in turn for the site's name, its size and type, its water rating, and which synodic season (`red`, `yellow` or `blue`) it belongs to, if any. Pressing <kbd>S</kbd> again will let you edit those.
 - <kbd>D</kbd> - mark hovered node as decorative. Decorative nodes are used to make paths follow the underlying map, and have no semantic meaning.
-- <kbd>Y</kbd> - cycle hovered node's flyby boost. Pressing <kbd>Y</kbd> again will cycle through (+1), (+2), (+3), (+4). Most flyby nodes on the map are Lagrange-equivalents.
+- <kbd>V</kbd> - mark hovered node as the Venus flyby, which gives a (+2) boost and is only usable in the blue season.
+- <kbd>Y</kbd> - cycle hovered node's flyby boost through (+1), (+2), (+3), (+4) and back to none. Most flyby nodes on the map are Lagrange-equivalents.
+- <kbd>O</kbd> - set hovered node's flyby boost to the vehicle's thrust, which is how the Solar Oberth manoeuvre is modelled.
 - <kbd>Z</kbd> - mark hovered node as containing a hazard. Works on any node type; hazardousness is orthogonal to node type. Aerobrake nodes are modeled as hazard nodes.
 - <kbd>A</kbd> - link two nodes together. The first node which <kbd>A</kbd> is pressed on is stored, and no link is made until a second node is selected by pressing <kbd>A</kbd> on it.
 - <kbd>J</kbd> - download a formatted JSON export of the current map data.
 - <kbd>0</kbd>–<kbd>9</kbd> - set label of hovered exit. This operates on the hovered node _and_ the hovered edge, which will be highlighted green. It sets the edge label for that entry/exit on the current node. Note that this can be different at different ends of the same edge. Exit labels are used to indicate which directions can be coasted through in a Hohmann: entering on a path labeled '1' means you can coast out through an exit labeled '1', but switching to a path with a different label costs 2 burns. The edge label '0' is special, and is used to indicate 1-way edges: the planner will never enter a node through an edge marked '0'. This is used to model aerobrake paths, which can only be traversed in one direction.
 
-## Future work
+## Development
 
-### Path planning heuristics
+```sh
+npm install
+npm run start:dev   # webpack-dev-server
+npm run typecheck   # tsc --noEmit; the source is JavaScript checked by JSDoc types
+npm run build       # production build into dist/
+```
 
-At present, there is only one available method by which the tool can compare two paths to decide which is 'better', and that's the "burns > turns > hazards" metric. That is, if the planner can save a burn by waiting a turn or taking a hazard, it will. Similarly, if it can save a turn by taking a hazard, it will. Ideally it would be possible to rearrange these goals to minimize hazards over burns, or turns over burns, or any arbitrary ordering. See [#4](https://github.com/nornagon/hf-mission-planner/issues/4).
-
-### Implement the Solar Oberth flyby
-
-Currently, the tool has no way to ask you for the thrust of your vehicle, so it can't calculate the bonus burns you'd get from performing a Solar Oberth maneuver. As such, the node is left unconnected on the graph currently. See [#9](https://github.com/nornagon/hf-mission-planner/issues/9).
-
-Further, once we know the thrust of a vehicle, it's possible we could compute slightly more efficient paths by knowing the maximum number of burns per turn that a vehicle is capable of. Handling multiple engines with differing thrust is probably out of scope for the tool at present—if needed, you can plan two separate paths with different thrusts.
-
-### Represent synodic sites
-
-The tool currently assumes that every site is available at all times, which isn't true in the game. Some sites are "synodic sites", indicated on the map by blue, red or yellow outlines, and it's only possible to enter those sites during the relevant phase of the sun spot cycle. This is particularly relevant for the Venus flyby node, which the planner likes to use for all sorts of missions, but is actually only available 1/3rd of the time. See [#11](https://github.com/nornagon/hf-mission-planner/issues/11).
+Pushing to `main` builds and publishes to GitHub Pages via [`.github/workflows/deploy-gh-pages.yml`](.github/workflows/deploy-gh-pages.yml). The first run turns Pages on and points it at Actions itself, so a fresh fork needs nothing set by hand beyond having Actions enabled.

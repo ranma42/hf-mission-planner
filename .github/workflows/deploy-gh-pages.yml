@@ -10,21 +10,32 @@ permissions:
   pages: write
   id-token: write
 
+# One deployment at a time. Queued runs are skipped in favour of the newest,
+# but a run already publishing is left alone: cancelling it half-way would
+# leave the site serving a mixture of two builds.
 concurrency:
   group: "pages"
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      # Also turns Pages on, with Actions as its source, the first time this
+      # runs. Without it the deploy below fails on any repository where that
+      # was never set by hand — a fresh fork, for instance.
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+        with:
+          enablement: true
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -34,7 +45,7 @@ jobs:
         run: npm run build
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
@@ -47,4 +58,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
