@@ -26,13 +26,8 @@ const metricMeta = {
   radHazards: {sg: 'rad hazard', pl: 'rad hazards', abbr: 'R'},
 }
 
-/** @param {{metrics: MetricKey[], solutions: Solution[], solutionsStale: boolean, solutionsComputing: boolean, refreshSolutions: () => void, weight: MetricWeights, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void}} props */
-function SolutionList({metrics, solutions, solutionsStale, solutionsComputing, refreshSolutions, weight, previewSolution, chooseSolution}) {
-  if (solutionsStale) return e('button', {
-    type: 'button',
-    className: 'PathInfo-exploreButton',
-    onClick: refreshSolutions,
-  }, 'Refresh alternatives')
+/** @param {{metrics: MetricKey[], solutions: Solution[], solutionsComputing: boolean, weight: MetricWeights, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void}} props */
+function SolutionList({metrics, solutions, solutionsComputing, weight, previewSolution, chooseSolution}) {
   if (!solutions.length) return e('div', {className: 'PathInfo-empty'},
     solutionsComputing ? 'Searching…' : 'No alternatives found')
 
@@ -66,8 +61,8 @@ function SolutionList({metrics, solutions, solutionsStale, solutionsComputing, r
   )
 }
 
-/** @param {{mapData: MapData, path: PathNode[]|null, weight: MetricWeights, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, exploring: boolean, toggleExplore: () => void, solutions: Solution[], solutionsStale: boolean, solutionsComputing: boolean, refreshSolutions: () => void, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void, cancelPath: () => void}} props */
-function PathInfo({mapData, path, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsStale, solutionsComputing, refreshSolutions, previewSolution, chooseSolution, cancelPath}) {
+/** @param {{mapData: MapData, path: PathNode[]|null, weight: MetricWeights, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, exploring: boolean, toggleExplore: () => void, solutions: Solution[], solutionsComputing: boolean, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void, cancelPath: () => void}} props */
+function PathInfo({mapData, path, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath}) {
   /** @type {[{key: MetricKey, order: MetricKey[]}|null, (drag: {key: MetricKey, order: MetricKey[]}|null) => void]} */
   const [drag, setDrag] = React.useState(null)
 
@@ -98,7 +93,7 @@ function PathInfo({mapData, path, weight, metricPriority, setMetricPriority, exp
   }
 
   return e('div', {className: 'PathInfo'},
-    exploring ? e(SolutionList, {metrics: displayOrder, solutions, solutionsStale, solutionsComputing, refreshSolutions, weight, previewSolution, chooseSolution}) : displayOrder.map((key, i) => {
+    exploring ? e(SolutionList, {metrics: displayOrder, solutions, solutionsComputing, weight, previewSolution, chooseSolution}) : displayOrder.map((key, i) => {
       const {sg, pl: plural} = metricMeta[key]
       return e('div', {
         key,
@@ -255,10 +250,10 @@ function VehicleInfo({isru, setIsru, thrust, setThrust, enabledSiteTypes, toggle
   )
 }
 
-/** @param {{mapData: MapData, path: PathNode[]|null, weight: MetricWeights, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, exploring: boolean, toggleExplore: () => void, solutions: Solution[], solutionsStale: boolean, solutionsComputing: boolean, refreshSolutions: () => void, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void, cancelPath: () => void, isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} props */
-export function Overlay({mapData, path, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsStale, solutionsComputing, refreshSolutions, previewSolution, chooseSolution, cancelPath, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
+/** @param {{mapData: MapData, path: PathNode[]|null, weight: MetricWeights, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, exploring: boolean, toggleExplore: () => void, solutions: Solution[], solutionsComputing: boolean, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void, cancelPath: () => void, isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} props */
+export function Overlay({mapData, path, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
   return e(React.Fragment, null,
-    e(PathInfo, {mapData, path, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsStale, solutionsComputing, refreshSolutions, previewSolution, chooseSolution, cancelPath}),
+    e(PathInfo, {mapData, path, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath}),
     e(VehicleInfo, {isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}),
   )
 }

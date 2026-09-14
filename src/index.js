@@ -149,7 +149,7 @@ canvas.onclick = e => {
       window.highlightedPath = highlightedPath
       endPathing()
       previewedPath = null
-      recomputeSolutions({force: true})
+      recomputeSolutions()
     } else {
       beginPathing(closestId)
     }
@@ -193,7 +193,12 @@ function refreshPath() {
     const closestId = nearestPoint(mousePos.x, mousePos.y, id => mapData.points[id].type !== 'decorative')
 
     if (canPath(closestId)) {
+      const previousDestination = highlightedPath?.[highlightedPath.length - 1].node
       highlightedPath = search.drawPath(pathData, pathOrigin, closestId)
+      const destination = highlightedPath?.[highlightedPath.length - 1].node
+      // Follow the pointer while exploring, but only once it settles on a new
+      // node — a search per mousemove would be all cancellation and no results.
+      if (exploring && destination && destination !== previousDestination) scheduleSolutions()
     }
   }
 }
@@ -508,8 +513,8 @@ let exploring = false
 let exploreCache = null
 /** @type {Solution[]} */
 let solutions = []
-/** Set when a setting changed the graph and the cached search can no longer be trusted. */
-let solutionsStale = false
+/** Pending debounced search; bursts of changes collapse into one run. */
+let solutionsTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null)
 /** True while a worker search is in flight; `solutions` may be partial. */
 let solutionsComputing = false
 /** @type {Worker|null} */
@@ -563,7 +568,23 @@ function getSearchWorker() {
 
 function invalidateExploreCache() {
   exploreCache = null
-  if (exploring) solutionsStale = true
+  if (exploring) scheduleSolutions()
+}
+
+/**
+ * Recompute the alternatives once the input settles. Dragging the thrust slider
+ * or sweeping the pointer across the map fires continuously, and each search can
+ * run for seconds, so coalesce the burst rather than starting and killing a
+ * worker per event.
+ * @param {number} [delay]
+ */
+function scheduleSolutions(delay = 250) {
+  if (solutionsTimer !== null) clearTimeout(solutionsTimer)
+  solutionsTimer = setTimeout(() => {
+    solutionsTimer = null
+    recomputeSolutions()
+    draw()
+  }, delay)
 }
 
 
@@ -597,40 +618,26 @@ function solutionSortKey(s) {
  * Refresh the displayed trade-offs for the current path's endpoints. The front
  * itself does not depend on `metricPriority` — that only sorts it — so a
  * priority change re-sorts from cache rather than searching again.
- *
- * Without `force` this only refreshes from a warm cache: the search is far too
- * expensive to redo on every tick of the thrust slider, so a cold cache is left
- * stale for the user to refresh deliberately.
- * @param {{force?: boolean}} [options]
  */
-function recomputeSolutions({force = false} = {}) {
+function recomputeSolutions() {
   solutions = []
   if (!exploring || !highlightedPath) {
-    solutionsStale = false
-    solutionsComputing = false
-    pendingExplore = null
+    if (pendingExplore) cancelSearchWorker()
     return
   }
   const fromId = highlightedPath[0].node
   const toId = highlightedPath[highlightedPath.length - 1].node
-  const warm = exploreCache && exploreCache.sourceId === fromId && exploreCache.targetId === toId
-  if (!warm && !force) {
-    solutionsStale = true
-    solutionsComputing = false
-    pendingExplore = null
-    return
-  }
-  solutionsStale = false
 
-  if (warm) {
-    solutionsComputing = false
-    pendingExplore = null
-    solutions = sortSolutions(/** @type {{solutions: Solution[]}} */ (exploreCache).solutions)
+  if (exploreCache && exploreCache.sourceId === fromId && exploreCache.targetId === toId) {
+    if (pendingExplore) cancelSearchWorker()
+    solutions = sortSolutions(exploreCache.solutions)
     return
   }
+  // Already searching for exactly this pair; let it finish.
+  if (pendingExplore && pendingExplore.sourceId === fromId && pendingExplore.targetId === toId) return
 
   // A superseded search cannot be interrupted, so discard the worker outright
-  // rather than let up to tens of seconds of dead work delay this request.
+  // rather than let seconds of dead work delay this request.
   if (pendingExplore) cancelSearchWorker()
 
   const worker = getSearchWorker()
@@ -656,14 +663,10 @@ function recomputeSolutions({force = false} = {}) {
 function toggleExplore() {
   exploring = !exploring
   previewedPath = null
-  recomputeSolutions({force: exploring})
+  recomputeSolutions()
   draw()
 }
 
-function refreshSolutions() {
-  recomputeSolutions({force: true})
-  draw()
-}
 
 /** @param {PathNode[]|null} path */
 function previewSolution(path) {
@@ -1069,7 +1072,7 @@ function draw() {
     ctx.restore()
   }
   const weight = search.pathWeight(highlightedPath)
-  ReactDOM.render(React.createElement(Overlay, {mapData, path: highlightedPath, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsStale, solutionsComputing, refreshSolutions, previewSolution, chooseSolution, cancelPath: () => { cancelPathSelection(); draw() }, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}), overlay)
+  ReactDOM.render(React.createElement(Overlay, {mapData, path: highlightedPath, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath: () => { cancelPathSelection(); draw() }, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}), overlay)
 }
 
 /** @param {number} burns */
@@ -1166,16 +1169,22 @@ window.planner = {
   get mapData() { return mapData },
   get metricPriority() { return metricPriority },
   get thrust() { return thrust },
-  setThrust: (/** @type {number} */ n) => { thrust = n; refreshSearch() },
+  setThrust,
   get search() { return search },
   get solutions() { return solutions },
+  /** Enter destination-picking mode, as clicking an origin does. */
+  beginPathingForTest: (/** @type {string} */ originId) => { exploring = true; beginPathing(originId) },
+  /** Destination of the path currently shown. */
+  currentDestination: () => highlightedPath?.[highlightedPath.length - 1].node ?? null,
+  /** Destination the cached/in-flight alternatives are for. */
+  exploreTargetId: () => exploreCache?.targetId ?? pendingExplore?.targetId ?? null,
   get solutionsComputing() { return solutionsComputing },
   /** Set up and kick off an Explore for a pair of nodes, as clicking would. */
   explore: (/** @type {string} */ fromId, /** @type {string} */ toId) => {
     highlightedPath = search.drawPath(search.findPath(fromId), fromId, toId) ?? null
     exploring = true
     exploreCache = null
-    recomputeSolutions({force: true})
+    recomputeSolutions()
     return !!highlightedPath
   },
 }
