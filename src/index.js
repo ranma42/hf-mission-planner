@@ -70,11 +70,16 @@ let pathData = null
 
 const siteTypeOptions = ['C', 'S', 'M', 'V', 'D', 'H']
 /** @type {MetricKey[]} */
-let metricPriority = ['burns', 'turns', 'hazards', 'radHazards']
+let metricPriority = ['fuel', 'turns', 'hazards', 'radHazards']
 let isru = 0
 let thrust = 12
 /** Direction changes the vehicle may make per turn without spending burns. */
 let pivots = 0
+/** Tanks of fuel per burn, as a fraction. At 1/1 a burn costs a tank, which is
+ * the model this one replaced; at 0/1 the drive burns nothing and thrust is the
+ * only limit on it. */
+let fuelNum = 1
+let fuelDen = 1
 /** @type {Set<string>} */
 let enabledSiteTypes = new Set(siteTypeOptions)
 
@@ -82,7 +87,7 @@ let enabledSiteTypes = new Set(siteTypeOptions)
 let search
 /** Rebuild the search after any change to the map or the vehicle it captured. */
 function refreshSearch() {
-  search = createSearch({mapData, thrust, pivots, solarSeason, metricPriority})
+  search = createSearch({mapData, thrust, pivots, fuelNum, fuelDen, solarSeason, metricPriority})
 }
 
 function cancelPathSelection() {
@@ -703,7 +708,7 @@ function recomputeSolutions() {
   worker.postMessage({
     id,
     map: mapData.toJSON(),
-    thrust, pivots, solarSeason, metricPriority,
+    thrust, pivots, fuelNum, fuelDen, solarSeason, metricPriority,
     fromId, toId,
   })
 }
@@ -744,6 +749,28 @@ function setPivots(value) {
   const clamped = Math.max(0, Math.min(MAX_PIVOTS, Math.round(value)))
   if (clamped === pivots) return
   pivots = clamped
+  refreshSearch()
+  invalidateExploreCache()
+  recomputeHighlightedPath()
+  draw()
+}
+
+/** @param {number} num */
+function setFuelNum(num) {
+  const clamped = Math.max(0, Math.round(num))
+  if (clamped === fuelNum) return
+  fuelNum = clamped
+  refreshSearch()
+  invalidateExploreCache()
+  recomputeHighlightedPath()
+  draw()
+}
+
+/** @param {number} den */
+function setFuelDen(den) {
+  const clamped = Math.max(1, Math.round(den))
+  if (clamped === fuelDen) return
+  fuelDen = clamped
   refreshSearch()
   invalidateExploreCache()
   recomputeHighlightedPath()
@@ -1134,7 +1161,7 @@ function draw() {
     ctx.restore()
   }
   const weight = search.pathWeight(highlightedPath)
-  ReactDOM.render(React.createElement(Overlay, {mapData, path: highlightedPath, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath: () => { cancelPathSelection(); draw() }, isru, setIsru, thrust, setThrust, pivots, setPivots, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}), overlay)
+  ReactDOM.render(React.createElement(Overlay, {mapData, path: highlightedPath, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath: () => { cancelPathSelection(); draw() }, isru, setIsru, thrust, setThrust, pivots, setPivots, fuelNum, setFuelNum, fuelDen, setFuelDen, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}), overlay)
 }
 
 
@@ -1224,6 +1251,10 @@ window.planner = {
   get thrust() { return thrust },
   get pivots() { return pivots },
   setPivots,
+  get fuelNum() { return fuelNum },
+  setFuelNum,
+  get fuelDen() { return fuelDen },
+  setFuelDen,
   setThrust,
   get search() { return search },
   get solutions() { return solutions },

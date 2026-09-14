@@ -3,13 +3,22 @@ import { paretoSearch, labelPath } from './pareto'
 
 /** Every metric, in a fixed order — used wherever a stable key or comparison is
  * needed, independent of the user's current display priority. @type {MetricKey[]} */
-export const ALL_METRICS = ['burns', 'turns', 'hazards', 'radHazards']
+export const ALL_METRICS = ['fuel', 'turns', 'hazards', 'radHazards']
+
+/** Totalled and reported, but never optimised: they are consequences of a route
+ * rather than trade-offs to be made against one another. @type {TrackedKey[]} */
+export const TRACKED_METRICS = ['burns', 'pivots']
+
+/** @type {(MetricKey|TrackedKey)[]} */
+const SUMMED_METRICS = [...ALL_METRICS, ...TRACKED_METRICS]
 
 /**
  * @typedef {object} SearchContext
  * @property {import('./MapData').MapData} mapData
  * @property {number} thrust
  * @property {number} pivots direction changes the vehicle may make per turn
+ * @property {number} fuelNum tanks spent per burn, numerator
+ * @property {number} fuelDen tanks spent per burn, denominator
  * @property {string} solarSeason
  * @property {MetricKey[]} metricPriority tie-break order for single-path searches
  */
@@ -24,7 +33,7 @@ export const ALL_METRICS = ['burns', 'turns', 'hazards', 'radHazards']
  *
  * @param {SearchContext} context
  */
-export function createSearch({mapData, thrust, pivots, solarSeason, metricPriority}) {
+export function createSearch({mapData, thrust, pivots, fuelNum, fuelDen, solarSeason, metricPriority}) {
   /**
    * Are you allowed to go to u from v, given the path previous?
    * @param {PathNode} u
@@ -172,6 +181,68 @@ export function createSearch({mapData, thrust, pivots, solarSeason, metricPriori
     return vBurnsRemaining < uBurnsRemaining ? uBurnsRemaining - vBurnsRemaining : 0
   }
 
+  /** Tanks drawn by `burns` engine burns in one turn. A part-used tank is spent
+   * in full, so the turn's burns round up together rather than one at a time.
+   * Landings cost half burns, so count in halves and stay in integers — the
+   * rounding is the model here, not an implementation detail.
+   * @param {number} burns */
+  function tanksFor(burns) {
+    const halfBurns = Math.round(burns * 2)
+    const halfDen = 2 * fuelDen
+    return Math.floor((halfBurns * fuelNum + halfDen - 1) / halfDen)
+  }
+
+  /**
+   * Knowing the turn's burns needs no extra state. `burnsRemaining` refills to
+   * `thrust` at the start of every turn and only falls within one (bonus burns
+   * are refunded into it rather than spent from it, which is why `burnWeight`
+   * reads the same quantity), so the burns so far this turn are exactly
+   * `thrust - burnsRemaining`.
+   *
+   * The charge falls due when the turn closes — `done` or `wait` — rather than
+   * being spread over the burns as they happen. Spreading it is tempting, since
+   * the running totals telescope to the same figure and it keeps the lead
+   * metric moving, but it is wrong: it fuses the tanks already spent with the
+   * part-tank in hand, and dominance cannot tell them apart. At 1/3, three
+   * tanks with a fresh turn and two tanks with two burns already made both
+   * total three, and the first looks better for having more burns left — but
+   * the next burn costs it a whole tank and the second nothing, because the
+   * second has already paid for the tank it is drawing on. Pruning on that
+   * comparison loses real routes: it cost Sylvia -> Sedna its 24-tank
+   * six-turn route and reported the 25-tank one as the best there was.
+   *
+   * Billed at the boundary, the weight carries only completed turns and
+   * `burnsRemaining` carries the rest, so more of it is never worse and the
+   * prune is sound again.
+   *
+   * @param {PathNode} u @param {PathNode} v
+   */
+  function fuelWeight(u, v) {
+    if (!v.done && !v.wait) return 0
+    return tanksFor(thrust - u.burnsRemaining)
+  }
+
+  /**
+   * Tanks a node's burns have committed it to but that its turn has not been
+   * billed for yet. Billing in arrears is what keeps the prune sound, but it
+   * also leaves the fuel axis flat within a turn, and a lead metric that stands
+   * still tells a queue nothing about what to pop next and a bound nothing to
+   * prune against. This is what the turn will owe, so both can use it without
+   * ever coming to prefer a costlier route. Zero once the turn has closed and
+   * the charge has been made.
+   * @param {PathNode} n @returns {number[]}
+   */
+  function fuelPending(n) {
+    return [n.done || n.wait ? 0 : tanksFor(thrust - n.burnsRemaining)]
+  }
+
+  /** @param {PathNode} u @param {PathNode} v */
+  function pivotWeight(u, v) {
+    const {pivotsRemaining: uPivotsRemaining} = u
+    const {pivotsRemaining: vPivotsRemaining} = v
+    return vPivotsRemaining < uPivotsRemaining ? uPivotsRemaining - vPivotsRemaining : 0
+  }
+
   /** @param {PathNode} u @param {PathNode} v */
   function turnWeight(u, v) {
     const {wait} = v
@@ -213,19 +284,28 @@ export function createSearch({mapData, thrust, pivots, solarSeason, metricPriori
 
   /** @param {PathNode} u @param {PathNode} v */
   function edgeWeights(u, v) {
+    const fuel = fuelWeight(u, v)
     const burns = burnWeight(u, v)
+    const pivots = pivotWeight(u, v)
     const turns = turnWeight(u, v)
     const hazards = hazardWeight(u, v)
     const radHazards = radHazardWeight(u, v)
     const segments = segmentWeight(u, v)
-    return {burns, turns, hazards, radHazards, segments}
+    return {fuel, burns, pivots, turns, hazards, radHazards, segments}
   }
+
+  /** Tie-breakers, in the order they are consulted, appended after the metrics
+   * by both weight functions. They decide which of several equally optimal
+   * paths is the one shown, so the reported burns are the fewest that buy this
+   * trade-off rather than whichever path happened to be found first.
+   * @type {(TrackedKey|'segments')[]} */
+  const TIE_BREAKERS = [...TRACKED_METRICS, 'segments']
 
   /** @param {MetricKey[]} order @returns {(u: PathNode, v: PathNode) => number[]} */
   function makeNodeWeight(order) {
     return (u, v) => {
       const weights = edgeWeights(u, v)
-      return [...order.map(key => weights[key]), weights.segments]
+      return [...order.map(key => weights[key]), ...TIE_BREAKERS.map(key => weights[key])]
     }
   }
 
@@ -299,7 +379,15 @@ export function createSearch({mapData, thrust, pivots, solarSeason, metricPriori
 
     const dominancePrune = makeDominancePrune()
     const source = /** @type {PathNode} */ ({node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivotsRemaining: pivots})
-    const pathData = dijkstra(getNeighbors, makeNodeWeight(order), tupleNs, pathId, source, allowed, dominancePrune, targetId)
+    // Fuel sits wherever `order` puts it, so the estimate goes to that index.
+    const fuelIndex = order.indexOf('fuel')
+    /** @param {PathNode} n @returns {number[]} */
+    const heuristic = (n) => {
+      const h = new Array(order.length + TIE_BREAKERS.length).fill(0)
+      if (fuelIndex >= 0) h[fuelIndex] = fuelPending(n)[0]
+      return h
+    }
+    const pathData = dijkstra(getNeighbors, makeNodeWeight(order), tupleNs, pathId, source, allowed, dominancePrune, targetId, heuristic)
 
     if (timed) console.timeEnd('calculating paths')
 
@@ -342,15 +430,12 @@ export function createSearch({mapData, thrust, pivots, solarSeason, metricPriori
   /** @param {PathNode[]|null|undefined} path */
   function pathWeight(path) {
     /** @type {MetricWeights} */
-    const total = {burns: 0, turns: 0, hazards: 0, radHazards: 0}
+    const total = {fuel: 0, turns: 0, hazards: 0, radHazards: 0, burns: 0, pivots: 0}
     if (!path) return total
 
     for (let i = 1; i < path.length; i++) {
       const edge = edgeWeights(path[i-1], path[i])
-      total.burns += edge.burns
-      total.turns += edge.turns
-      total.hazards += edge.hazards
-      total.radHazards += edge.radHazards
+      for (const k of SUMMED_METRICS) total[k] += edge[k]
     }
     return total
   }
@@ -389,9 +474,10 @@ export function createSearch({mapData, thrust, pivots, solarSeason, metricPriori
   /** @param {PathNode} u @param {PathNode} v @returns {number[]} */
   function paretoWeight(u, v) {
     const w = edgeWeights(u, v)
-    // Trailing `segments` is a tie-breaker only: it keeps the shortest-looking
-    // path among equals without splitting the front into segment-count variants.
-    return [...ALL_METRICS.map(k => w[k]), w.segments]
+    // The trailing entries are tie-breakers only: dominance stops at
+    // `metricCount`, so they choose the representative path among equals
+    // without splitting the front into a variant per burn count.
+    return [...ALL_METRICS.map(k => w[k]), ...TIE_BREAKERS.map(k => w[k])]
   }
 
   /** @template T @param {T[]} items @returns {T[][]} */
@@ -465,6 +551,12 @@ export function createSearch({mapData, thrust, pivots, solarSeason, metricPriori
       getNeighbors,
       weight: paretoWeight,
       metricCount: ALL_METRICS.length,
+      tieBreakCount: TIE_BREAKERS.length,
+      // Fuel is billed when the turn closes, so a label part-way through one
+      // reads as owing nothing and neither `bound` nor the target test can
+      // touch it. The tanks its burns have already committed it to are a lower
+      // bound on what it will be billed, and arm both again.
+      pending: fuelPending,
       // Ending the turn is terminal, so a `done` state anywhere but the
       // destination is a dead end not worth carrying a label for.
       allowed: (label, v) => (!v.done || isTarget(v)) && allowedAlongChain(label, v),

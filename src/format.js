@@ -14,8 +14,9 @@ export function formatBurns(burns) {
 }
 
 /**
- * Every metric is a whole count except burns, which come in halves.
- * @param {MetricKey} key @param {number} value
+ * Every metric is a whole count except burns, which come in halves — fuel
+ * included, since a part-used tank is spent in full.
+ * @param {MetricKey|TrackedKey} key @param {number} value
  */
 export function formatMetric(key, value) {
   return key === 'burns' ? formatBurns(value) : String(value)

@@ -1,5 +1,6 @@
 import React from 'react'
 import { formatMetric } from './format'
+import { TRACKED_METRICS } from './search'
 
 const e = React.createElement
 
@@ -21,10 +22,12 @@ function moveMetricTo(order, key, target) {
 /** @typedef {{weight: MetricWeights, path: PathNode[]}} Solution */
 
 const metricMeta = {
-  burns: {sg: 'burn', pl: 'burns', abbr: 'B'},
+  fuel: {sg: 'tank', pl: 'tanks', abbr: 'F'},
   turns: {sg: 'turn', pl: 'turns', abbr: 'T'},
   hazards: {sg: 'hazard', pl: 'hazards', abbr: 'H'},
   radHazards: {sg: 'rad hazard', pl: 'rad hazards', abbr: 'R'},
+  burns: {sg: 'burn', pl: 'burns', abbr: 'B'},
+  pivots: {sg: 'pivot', pl: 'pivots', abbr: 'P'},
 }
 
 /** @param {{metrics: MetricKey[], solutions: Solution[], solutionsComputing: boolean, weight: MetricWeights, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void}} props */
@@ -32,11 +35,20 @@ function SolutionList({metrics, solutions, solutionsComputing, weight, previewSo
   if (!solutions.length) return e('div', {className: 'PathInfo-empty'},
     solutionsComputing ? 'Searching…' : 'No alternatives found')
 
+  /** @type {(MetricKey|TrackedKey)[]} */
+  const columns = [...metrics, ...TRACKED_METRICS]
+
   // Each row is its own flex container, so without a shared width a wide figure
   // widens only its own row and the columns go ragged. Size every cell to the
   // widest value in the table instead.
   const widest = solutions.reduce((max, s) =>
-    metrics.reduce((m, key) => Math.max(m, formatMetric(key, s.weight[key]).length), max), 2)
+    columns.reduce((m, key) => Math.max(m, formatMetric(key, s.weight[key]).length), max), 2)
+
+  /** The read-outs are not part of the trade-off, so rule them off from the
+   * metrics rather than letting the eye read six equal columns.
+   * @param {MetricKey|TrackedKey} key */
+  const cellClass = (key) =>
+    'PathInfo-solutionCell' + (key === TRACKED_METRICS[0] ? ' PathInfo-solutionCell--tracked' : '')
 
   return e('div', {
     className: 'PathInfo-solutions',
@@ -45,8 +57,8 @@ function SolutionList({metrics, solutions, solutionsComputing, weight, previewSo
   },
     solutionsComputing ? e('div', {className: 'PathInfo-searching'}, 'Searching… best so far') : null,
     e('div', {className: 'PathInfo-solutionRow PathInfo-solutionHeader'},
-      metrics.map(key =>
-        e('span', {key, className: 'PathInfo-solutionCell', title: metricMeta[key].pl}, metricMeta[key].abbr)
+      columns.map(key =>
+        e('span', {key, className: cellClass(key), title: metricMeta[key].pl}, metricMeta[key].abbr)
       )
     ),
     solutions.map((solution, i) => {
@@ -56,13 +68,13 @@ function SolutionList({metrics, solutions, solutionsComputing, weight, previewSo
         type: 'button',
         className: 'PathInfo-solutionRow PathInfo-solutionButton' + (current ? ' selected' : ''),
         'aria-pressed': current,
-        title: metrics.map(key => pl(solution.weight[key], metricMeta[key].sg, metricMeta[key].pl)).join(', '),
+        title: columns.map(key => pl(solution.weight[key], metricMeta[key].sg, metricMeta[key].pl)).join(', '),
         onMouseEnter: () => previewSolution(solution.path),
         onFocus: () => previewSolution(solution.path),
         onClick: () => chooseSolution(solution.path),
       },
-        metrics.map(key =>
-          e('span', {key, className: 'PathInfo-solutionCell'}, formatMetric(key, solution.weight[key]))
+        columns.map(key =>
+          e('span', {key, className: cellClass(key)}, formatMetric(key, solution.weight[key]))
         )
       )
     })
@@ -145,6 +157,12 @@ function PathInfo({mapData, path, weight, metricPriority, setMetricPriority, exp
         ),
       )
     }),
+    exploring ? null : TRACKED_METRICS.map(key => {
+      const {sg, pl: plural} = metricMeta[key]
+      return e('div', {key, className: 'PathInfo-row PathInfo-trackedRow'},
+        e('span', {className: 'PathInfo-label'}, `${pl(weight[key], sg, plural)}`),
+      )
+    }),
     e('div', {className: 'PathInfo-row PathInfo-destinationRow'},
       e('span', {className: 'PathInfo-destination'}, `${sourcePoint?.siteName ?? '\u2022'} \u2192 ${destinationPoint?.siteName ?? '\u2022'}`),
       e('button', {
@@ -171,13 +189,20 @@ const siteTypeOptions = ['C', 'S', 'M', 'V', 'D', 'H']
 
 const solarSeasonOptions = ['red', 'yellow', 'blue']
 
-/** @param {{isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, pivots: number, setPivots: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} param0 */
-function VehicleInfo({isru, setIsru, thrust, setThrust, pivots, setPivots, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
+/** @param {{isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, pivots: number, setPivots: (value: number) => void, fuelNum: number, setFuelNum: (value: number) => void, fuelDen: number, setFuelDen: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} param0 */
+function VehicleInfo({isru, setIsru, thrust, setThrust, pivots, setPivots, fuelNum, setFuelNum, fuelDen, setFuelDen, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
   /** @param {string} value */
   const updateThrust = (value) => {
     const n = Number(value)
     if (Number.isNaN(n)) return
     setThrust(n)
+  }
+
+  /** @param {(value: number) => void} set @param {string} value */
+  const updateFuel = (set, value) => {
+    const n = Number(value)
+    if (Number.isNaN(n)) return
+    set(n)
   }
 
   return e('details', {className: 'VehicleInfo', open: true},
@@ -207,6 +232,34 @@ function VehicleInfo({isru, setIsru, thrust, setThrust, pivots, setPivots, enabl
             value: thrust,
             inputMode: 'numeric',
             onChange: (ev) => updateThrust(ev.target.value),
+          }),
+        )
+      ),
+      e('div', {className: 'field', role: 'group', 'aria-label': 'Fuel per Burn'},
+        e('div', {className: 'label-row'},
+          e('span', {className: 'label'}, 'Fuel per Burn'),
+        ),
+        e('div', {className: 'fuel-rate-inputs'},
+          e('input', {
+            type: 'number',
+            className: 'fuel-rate-field',
+            min: 0,
+            step: 1,
+            value: fuelNum,
+            inputMode: 'numeric',
+            'aria-label': 'Tanks',
+            onChange: (ev) => updateFuel(setFuelNum, ev.target.value),
+          }),
+          e('span', {className: 'fuel-rate-separator', 'aria-hidden': true}, '/'),
+          e('input', {
+            type: 'number',
+            className: 'fuel-rate-field',
+            min: 1,
+            step: 1,
+            value: fuelDen,
+            inputMode: 'numeric',
+            'aria-label': 'Burns',
+            onChange: (ev) => updateFuel(setFuelDen, ev.target.value),
           }),
         )
       ),
@@ -276,10 +329,10 @@ function VehicleInfo({isru, setIsru, thrust, setThrust, pivots, setPivots, enabl
   )
 }
 
-/** @param {{mapData: MapData, path: PathNode[]|null, weight: MetricWeights, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, exploring: boolean, toggleExplore: () => void, solutions: Solution[], solutionsComputing: boolean, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void, cancelPath: () => void, isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, pivots: number, setPivots: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} props */
-export function Overlay({mapData, path, weight, metricPriority, setMetricPriority, pivots, setPivots, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
+/** @param {{mapData: MapData, path: PathNode[]|null, weight: MetricWeights, metricPriority: MetricKey[], setMetricPriority: (order: MetricKey[]) => void, exploring: boolean, toggleExplore: () => void, solutions: Solution[], solutionsComputing: boolean, previewSolution: (path: PathNode[]|null) => void, chooseSolution: (path: PathNode[]) => void, cancelPath: () => void, isru: number, setIsru: (value: number) => void, thrust: number, setThrust: (value: number) => void, pivots: number, setPivots: (value: number) => void, fuelNum: number, setFuelNum: (value: number) => void, fuelDen: number, setFuelDen: (value: number) => void, enabledSiteTypes: Set<string>, toggleSiteType: (type: string) => void, solarSeason: string, setSolarSeason: (value: string) => void}} props */
+export function Overlay({mapData, path, weight, metricPriority, setMetricPriority, pivots, setPivots, fuelNum, setFuelNum, fuelDen, setFuelDen, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}) {
   return e(React.Fragment, null,
     e(PathInfo, {mapData, path, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath}),
-    e(VehicleInfo, {isru, setIsru, thrust, setThrust, pivots, setPivots, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}),
+    e(VehicleInfo, {isru, setIsru, thrust, setThrust, pivots, setPivots, fuelNum, setFuelNum, fuelDen, setFuelDen, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}),
   )
 }

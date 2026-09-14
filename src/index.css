@@ -60,6 +60,14 @@ canvas { display: block; }
   padding: 2px 4px;
   margin: 0 -4px;
 }
+.PathInfo-trackedRow {
+  /* Consequences of the route rather than choices about it: no handle, no
+     arrows, and set back from the metrics they follow. */
+  opacity: 0.55;
+  font-size: 16px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+}
 .PathInfo-metricRow.dragging {
   opacity: 0.5;
   background: rgba(255, 255, 255, 0.15);
@@ -125,6 +133,11 @@ canvas { display: block; }
   padding: 0 2px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+.PathInfo-solutionCell--tracked {
+  /* Rules the read-outs off from the metrics, so the row does not read as six
+     equally meaningful columns. */
+  border-left: 1px solid rgba(255, 255, 255, 0.25);
 }
 .PathInfo-solutionHeader {
   font-size: 12px;
@@ -405,6 +418,27 @@ canvas { display: block; }
   border: 2px solid white;
   border-radius: 999px;
   padding: 0;
+}
+.VehicleInfo .fuel-rate-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* Outspecifies the shared number-input rule below, which these still take
+   their colours and border from. Its width: min-content is wider than half
+   the panel, and a pair of them pushed the whole overlay into scrolling
+   sideways; sized to their contents and allowed to shrink, they cannot. */
+.VehicleInfo input[type="number"].fuel-rate-field {
+  flex: 0 1 5ch;
+  width: auto;
+  min-width: 0;
+  padding: 6px 4px;
+  text-align: center;
+}
+.VehicleInfo .fuel-rate-separator {
+  font-size: 20px;
+  opacity: 0.6;
 }
 .VehicleInfo input[type="number"] {
   width: 40px;

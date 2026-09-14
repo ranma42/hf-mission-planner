@@ -45,8 +45,10 @@ type MapDataJSON = {
 
 type PathNode = {node: string, dir: string|null, bonus: number, done?: true, wait?: true, burnsRemaining: number, pivotsRemaining: number}
 type PathData = {distance: Record<string, number[]>, previous: Record<string, PathNode>}
-type MetricKey = 'burns'|'turns'|'hazards'|'radHazards'
-type MetricWeights = Record<MetricKey, number>
+type MetricKey = 'fuel'|'turns'|'hazards'|'radHazards'
+/** Reported alongside the metrics, but not optimised for. */
+type TrackedKey = 'burns'|'pivots'
+type MetricWeights = Record<MetricKey|TrackedKey, number>
 type Solution = {weight: MetricWeights, path: PathNode[]}
 
 type Vec2 = {x: number, y: number}
