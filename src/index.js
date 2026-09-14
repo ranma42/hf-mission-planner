@@ -89,7 +89,7 @@ function cancelPathSelection() {
   previewedPath = null
   exploring = false
   solutions = []
-  if (pendingExplore) cancelSearchWorker()
+  cancelSearchWorker()
 }
 
 /** @param {MapDataJSON} json */
@@ -509,7 +509,11 @@ function setMetricPriority(order) {
 
 
 let exploring = false
-/** @type {{sourceId: string, targetId: string, solutions: Solution[]}|null} */
+/**
+ * Alternatives already computed for the current origin, keyed by destination, so
+ * revisiting a node costs nothing.
+ * @type {{sourceId: string, byTarget: Map<string, Solution[]>}|null}
+ */
 let exploreCache = null
 /** @type {Solution[]} */
 let solutions = []
@@ -535,6 +539,10 @@ let previewedPath = null
  */
 /** Drop an in-flight search. The worker has no way to be interrupted mid-run, so
  * the only way to stop it eating the next request is to discard it outright. */
+/**
+ * Abandon the in-flight search. It cannot be interrupted from outside, so the
+ * only way to stop it delaying the next request is to discard the worker.
+ */
 function cancelSearchWorker() {
   if (searchWorker) searchWorker.terminate()
   searchWorker = null
@@ -552,11 +560,12 @@ function getSearchWorker() {
     return null
   }
   searchWorker.onmessage = (event) => {
-    const {id, done, solutions: found, error} = event.data
+    const {id, done, targetId, solutions: found, error} = event.data
     if (!pendingExplore || id !== pendingExplore.id) return // superseded
     if (error) console.warn('search worker failed:', error)
+
     if (done) {
-      exploreCache = {sourceId: pendingExplore.sourceId, targetId: pendingExplore.targetId, solutions: found}
+      cacheSolutions(pendingExplore.sourceId, targetId, found)
       pendingExplore = null
       solutionsComputing = false
     }
@@ -564,6 +573,14 @@ function getSearchWorker() {
     draw()
   }
   return searchWorker
+}
+
+/** @param {string} sourceId @param {string} targetId @param {Solution[]} found */
+function cacheSolutions(sourceId, targetId, found) {
+  if (!exploreCache || exploreCache.sourceId !== sourceId) {
+    exploreCache = {sourceId, byTarget: new Map}
+  }
+  exploreCache.byTarget.set(targetId, found)
 }
 
 function invalidateExploreCache() {
@@ -622,29 +639,33 @@ function solutionSortKey(s) {
 function recomputeSolutions() {
   solutions = []
   if (!exploring || !highlightedPath) {
-    if (pendingExplore) cancelSearchWorker()
+    cancelSearchWorker()
     return
   }
   const fromId = highlightedPath[0].node
   const toId = highlightedPath[highlightedPath.length - 1].node
 
-  if (exploreCache && exploreCache.sourceId === fromId && exploreCache.targetId === toId) {
-    if (pendingExplore) cancelSearchWorker()
-    solutions = sortSolutions(exploreCache.solutions)
-    return
-  }
-  // Already searching for exactly this pair; let it finish.
+  // Already doing exactly this work; let it finish.
   if (pendingExplore && pendingExplore.sourceId === fromId && pendingExplore.targetId === toId) return
 
-  // A superseded search cannot be interrupted, so discard the worker outright
-  // rather than let seconds of dead work delay this request.
-  if (pendingExplore) cancelSearchWorker()
+  const cache = exploreCache && exploreCache.sourceId === fromId ? exploreCache : null
+  const cached = cache && cache.byTarget.get(toId)
+  if (cached) {
+    cancelSearchWorker()
+    solutions = sortSolutions(cached)
+    return
+  }
+
+  // Anything else in flight is no longer wanted, and cannot be interrupted, so
+  // discard it rather than let it delay this request.
+  cancelSearchWorker()
 
   const worker = getSearchWorker()
   if (!worker) {
     // No worker available: block, as this used to, rather than lose the feature.
-    exploreCache = {sourceId: fromId, targetId: toId, solutions: search.curateSolutions(search.findSolutions(fromId, toId))}
-    solutions = sortSolutions(exploreCache.solutions)
+    const found = search.curateSolutions(search.findSolutions(fromId, toId))
+    cacheSolutions(fromId, toId, found)
+    solutions = sortSolutions(found)
     return
   }
 
@@ -1075,6 +1096,7 @@ function draw() {
   ReactDOM.render(React.createElement(Overlay, {mapData, path: highlightedPath, weight, metricPriority, setMetricPriority, exploring, toggleExplore, solutions, solutionsComputing, previewSolution, chooseSolution, cancelPath: () => { cancelPathSelection(); draw() }, isru, setIsru, thrust, setThrust, enabledSiteTypes, toggleSiteType, solarSeason, setSolarSeason}), overlay)
 }
 
+
 /** @param {number} burns */
 function formatBurns(burns) {
   const wholeBurns = Math.floor(burns)
@@ -1173,17 +1195,18 @@ window.planner = {
   get search() { return search },
   get solutions() { return solutions },
   /** Enter destination-picking mode, as clicking an origin does. */
-  beginPathingForTest: (/** @type {string} */ originId) => { exploring = true; beginPathing(originId) },
+  beginPathingForTest: (/** @type {string} */ originId) => { exploring = true; beginPathing(originId); draw() },
   /** Destination of the path currently shown. */
   currentDestination: () => highlightedPath?.[highlightedPath.length - 1].node ?? null,
   /** Destination the cached/in-flight alternatives are for. */
-  exploreTargetId: () => exploreCache?.targetId ?? pendingExplore?.targetId ?? null,
+  exploreTargetId: () => pendingExplore?.targetId ?? null,
+  exploreCachedTargets: () => [...(exploreCache?.byTarget.keys() ?? [])],
   get solutionsComputing() { return solutionsComputing },
   /** Set up and kick off an Explore for a pair of nodes, as clicking would. */
-  explore: (/** @type {string} */ fromId, /** @type {string} */ toId) => {
+  explore: (/** @type {string} */ fromId, /** @type {string} */ toId, /** @type {boolean} */ cold = false) => {
     highlightedPath = search.drawPath(search.findPath(fromId), fromId, toId) ?? null
     exploring = true
-    exploreCache = null
+    if (cold) invalidateExploreCache()
     recomputeSolutions()
     return !!highlightedPath
   },

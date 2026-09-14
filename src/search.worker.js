@@ -2,23 +2,25 @@ import { createSearch } from './search'
 import { MapData } from './MapData'
 
 /**
- * Runs Explore off the main thread. The search can take tens of seconds on long
- * routes, which freezes the page if done inline; here the map is rebuilt from a
- * plain snapshot and the front is streamed back as it is discovered.
+ * Runs Explore off the main thread. The search takes long enough to freeze the
+ * page if done inline — seconds on a long route, and far worse on a phone — so
+ * it stays here regardless of how fast the algorithm gets.
  *
- * Requests are answered in order, and the main thread discards replies whose id
- * it has moved past, so a superseded search costs correctness nothing.
+ * The front is streamed back as it is found, so the list fills in rather than
+ * appearing all at once. Replies carry the id of the request that caused them;
+ * the main thread drops any whose id it has moved past, so a superseded search
+ * costs correctness nothing.
  */
 self.onmessage = (/** @type {MessageEvent} */ event) => {
   const {id, map, thrust, solarSeason, metricPriority, fromId, toId} = event.data
   const search = createSearch({mapData: MapData.fromJSON(map), thrust, solarSeason, metricPriority})
 
   try {
-    const front = search.findSolutions(fromId, toId, (partial) => {
-      self.postMessage({id, done: false, solutions: search.curateSolutions(partial)})
+    const front = search.findSolutions(fromId, toId, (/** @type {Solution[]} */ partial) => {
+      self.postMessage({id, done: false, targetId: toId, solutions: search.curateSolutions(partial)})
     })
-    self.postMessage({id, done: true, solutions: search.curateSolutions(front)})
+    self.postMessage({id, done: true, targetId: toId, solutions: search.curateSolutions(front)})
   } catch (e) {
-    self.postMessage({id, done: true, solutions: [], error: String(e && e.message || e)})
+    self.postMessage({id, done: true, targetId: toId, solutions: [], error: String(e && e.message || e)})
   }
 }
