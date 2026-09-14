@@ -50,3 +50,6 @@ type MetricWeights = Record<MetricKey, number>
 type Solution = {weight: MetricWeights, path: PathNode[]}
 
 type Vec2 = {x: number, y: number}
+
+/** Injected by webpack's DefinePlugin from the build mode. */
+declare const __PROD__: boolean
