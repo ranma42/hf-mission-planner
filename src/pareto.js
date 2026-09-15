@@ -95,6 +95,23 @@ export function paretoSearch({source, getNeighbors, weight, metricCount, tieBrea
     return true
   }
 
+  /** Do these agree on every metric? Only then do the tie-breakers get a say.
+   * @param {number[]} a @param {number[]} b */
+  const metricsEqual = (a, b) => {
+    for (let i = 0; i < metricCount; i++) if (a[i] !== b[i]) return false
+    return true
+  }
+  /** Lexicographic order on the tie-breakers alone. @param {number[]} a @param {number[]} b */
+  const tailLessEq = (a, b) => {
+    for (let i = metricCount; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i]
+    return true
+  }
+  /** Dominance over every entry, tie-breakers included. @param {number[]} a @param {number[]} b */
+  const fullyDominates = (a, b) => {
+    for (let i = 0; i < a.length; i++) if (a[i] > b[i]) return false
+    return true
+  }
+
   /** @param {number[]} a @param {number[]} b */
   const resourcesDominate = (a, b) => {
     for (let i = 0; i < a.length; i++) if (a[i] < b[i]) return false
@@ -113,6 +130,11 @@ export function paretoSearch({source, getNeighbors, weight, metricCount, tieBrea
   /**
    * Record a label unless something already known is at least as good, evicting
    * anything it makes redundant. Returns false if the label is not worth queueing.
+   *
+   * Where two labels tie on every metric the tie-breakers decide, rather than
+   * whichever was offered first. Arrival order is a property of how the search
+   * ran and not of the route, so leaving the choice to it meant an unrelated
+   * change to the vehicle could swap the path on screen for no visible reason.
    * @param {Label<Node>} label
    */
   const offer = (label) => {
@@ -122,10 +144,12 @@ export function paretoSearch({source, getNeighbors, weight, metricCount, tieBrea
       return true
     }
     for (const e of existing) {
-      if (weightDominates(e.weight, label.weight) && resourcesDominate(e.res, label.res)) return false
+      if (weightDominates(e.weight, label.weight) && resourcesDominate(e.res, label.res)
+          && (!metricsEqual(e.weight, label.weight) || tailLessEq(e.weight, label.weight))) return false
     }
     const kept = existing.filter(e => {
-      if (weightDominates(label.weight, e.weight) && resourcesDominate(label.res, e.res)) {
+      if (weightDominates(label.weight, e.weight) && resourcesDominate(label.res, e.res)
+          && (!metricsEqual(label.weight, e.weight) || tailLessEq(label.weight, e.weight))) {
         e.live = false // already queued; skipped when popped
         return false
       }
@@ -166,8 +190,11 @@ export function paretoSearch({source, getNeighbors, weight, metricCount, tieBrea
     // reached at least as cheaply on every metric, this branch cannot contribute.
     // `targetFloor` is the componentwise minimum over targets: if the label beats
     // it anywhere, no target can dominate it and the full scan is skipped.
+    // The tie-breakers count here too. A label that merely ties a target on cost
+    // is still worth following, since it may yet arrive by a better path, and
+    // its tie-breakers only grow from here.
     if (targetFloor && weightDominates(targetFloor, est) &&
-        targets.some(t => t.live && weightDominates(t.weight, est))) continue
+        targets.some(t => t.live && fullyDominates(t.weight, est))) continue
 
     for (const v of getNeighbors(label.node)) {
       if (!allowed(label, v)) continue
