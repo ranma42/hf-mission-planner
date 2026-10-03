@@ -1,0 +1,70 @@
+{
+  "books": [
+    {"id": "core", "title": "Core Rules"},
+    {"id": "appendix", "title": "Appendix"},
+    {"id": "m1", "title": "Module 1: Terawatt"},
+    {"id": "m2", "title": "Module 2: Colonization"}
+  ],
+  "editions": [
+    {"id": "publisher", "title": "Publisher", "origin": "ION Game Design's rulebook downloads, linked from https://iongamedesign.com/products/high-frontier-4-all"},
+    {"id": "living", "title": "Living rules", "origin": "the printable PDFs in ION's living-rules spreadsheet, https://docs.google.com/spreadsheets/d/1dt1g3XGxMcQPIij1uLAc-x9-TiZXiwHTX8-jYK-3hEg"}
+  ],
+  "documents": [
+    {
+      "book": "core",
+      "edition": "publisher",
+      "date": "2021-03-07",
+      "url": "https://nx86265.your-storageshare.de/s/sNyb57oRF4djgQi/download?path=/High%20Frontier%204%20All&files=High%20Frontier%204%20All%20Core%20Rules.pdf",
+      "bytes": 52256585,
+      "sha256": "87b0078c4e7a07f34889f7d8d4a1acf4f5bc727a7824956c1069ddfff24cbccd"
+    },
+    {
+      "book": "appendix",
+      "edition": "publisher",
+      "date": "2020-12-20",
+      "url": "https://nx86265.your-storageshare.de/s/sNyb57oRF4djgQi/download?path=/High%20Frontier%204%20All&files=High%20Frontier%204%20All%20Appendix.pdf",
+      "bytes": 13744146,
+      "sha256": "2ce814bb89e304cd1fef760173d198f3c9b8c66c2116c39747f69d52fca49526"
+    },
+    {
+      "book": "m1",
+      "edition": "publisher",
+      "date": "2021-03-07",
+      "url": "https://nx86265.your-storageshare.de/s/sNyb57oRF4djgQi/download?path=/High%20Frontier%204%20All&files=High%20Frontier%204%20All%20M1_Terawatt_rules.pdf",
+      "bytes": 4893345,
+      "sha256": "bf3b52d2394d00d71d8793c5b751b9b8c08017d0b41a4b26420ab2368bc6de51"
+    },
+    {
+      "book": "m2",
+      "edition": "publisher",
+      "date": "2021-03-07",
+      "url": "https://nx86265.your-storageshare.de/s/sNyb57oRF4djgQi/download?path=/High%20Frontier%204%20All&files=High%20Frontier%204%20All%20M2_Colonization_rules.pdf",
+      "bytes": 2618982,
+      "sha256": "7333ca87a30da41362b6c7523487b50bc15a729bbb9de432ba8becde64f19457"
+    },
+    {
+      "book": "core",
+      "edition": "living",
+      "date": "2026-04-29",
+      "url": "https://www.dropbox.com/scl/fi/xhv8q5f96hvuip0x6is9g/HF4-Core-Rules.pdf?rlkey=yggvm85oi09x4fdx4qwmf0yqj&dl=1",
+      "bytes": 56377277,
+      "sha256": "87c963af51e52e8b97f0611b19cd86526e31e6d74357db753464d3a819df8226"
+    },
+    {
+      "book": "appendix",
+      "edition": "living",
+      "date": "2025-10-08",
+      "url": "https://www.dropbox.com/scl/fi/sbsqrb2hz1jcqu97jfywn/HF4-Appendix-open-with-InDesign2024.pdf?rlkey=o0hzd2vcmmffny9pu0vut28nc&dl=1",
+      "bytes": 2737511,
+      "sha256": "f79b85d2cf6bd2fc49b3cd35c11a7946a233437ecd73d224bc8a70be92233f76"
+    },
+    {
+      "book": "m2",
+      "edition": "living",
+      "date": "2025-10-17",
+      "url": "https://www.dropbox.com/scl/fi/w0fd1a74mfuukugvp4zvq/HF4-M2_Colonization_rules.pdf?rlkey=sv9vif6g8es32fy9mkv1crbtz&dl=1",
+      "bytes": 699034,
+      "sha256": "42f3de7682bf1c944c193d987ab6de6dadb33bedc59e4f3674f8bee1965c6f1e"
+    }
+  ]
+}

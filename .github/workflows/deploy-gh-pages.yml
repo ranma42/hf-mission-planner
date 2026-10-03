@@ -41,6 +41,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The rulebook PDFs are not in git: assets/rules/sources.json records
+      # where each comes from and its SHA-256, and this fails the deploy if any
+      # source has changed. Cached by that file, so they are only downloaded
+      # again when it changes.
+      - name: Cache rulebooks
+        uses: actions/cache@v6
+        with:
+          path: .cache/rules
+          key: rules-${{ hashFiles('assets/rules/sources.json') }}
+
+      - name: Fetch rulebooks
+        run: npm run rules:fetch
+
       - name: Build
         run: npm run build
 

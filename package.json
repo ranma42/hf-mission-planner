@@ -6,6 +6,7 @@
   "scripts": {
     "build": "webpack --mode production",
     "typecheck": "tsc --noEmit",
+    "rules:fetch": "node scripts/rules.mjs fetch",
     "start:dev": "webpack-dev-server --mode development",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist"

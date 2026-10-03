@@ -76,4 +76,12 @@ npm run typecheck   # tsc --noEmit; the source is JavaScript checked by JSDoc ty
 npm run build       # production build into dist/
 ```
 
+The rulebook PDFs are too big for git, so `assets/rules/sources.json` records the URL and SHA-256 of each one instead:
+
+```sh
+npm run rules:fetch  # download them into .cache/rules/, check them, and copy them into dist/rules/
+```
+
+To update a rulebook, change its entry in `sources.json` (url, `bytes`, `sha256`, `date`), then fetch it again. A deploy fails if a download does not match its digest.
+
 Pushing to `main` builds and publishes to GitHub Pages via [`.github/workflows/deploy-gh-pages.yml`](.github/workflows/deploy-gh-pages.yml). The first run turns Pages on and points it at Actions itself, so a fresh fork needs nothing set by hand beyond having Actions enabled.
