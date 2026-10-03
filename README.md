@@ -45,6 +45,10 @@ Routes are ranked by fuel, then turns, then hazards, then radiation hazards. Dra
 
 **Explore alternatives** replaces that list with every route that is best under *some* ordering of the four, not just the one your current ranking picks — so you can see what a turn is worth in fuel before deciding. Hover a row to preview that route on the map, and click it to keep it.
 
+### Rules
+
+The 📖 button in the top-left corner opens the rulebooks: Core, Appendix, Module 1 and Module 2. For each one there is the edition ION Game Design publishes for download and the current living rules. M1 has no living-rules PDF yet. There is also a list of the text changes between the two editions. The viewer can search the whole book. The PDFs are stored for offline use when the app is opened, and the rules page has a button that downloads any that are still missing.
+
 ### Edit mode
 
 If you're developing this tool you might want to edit the map data to fix errors or update the map to a new version. You're in luck, HF Mission Planner has an edit mode optimized for fast input (and certainly not for ease of learning or intuitiveness). If you find yourself in a position to use it, the best reference is probably the source code, but here's a list of keyboard shortcuts as of writing:
@@ -75,5 +79,14 @@ npm run start:dev   # webpack-dev-server
 npm run typecheck   # tsc --noEmit; the source is JavaScript checked by JSDoc types
 npm run build       # production build into dist/
 ```
+
+The rulebook PDFs are too big for git, so `assets/rules/sources.json` records the URL and SHA-256 of each one instead:
+
+```sh
+npm run rules:fetch  # download them into .cache/rules/, check them, and copy them into dist/rules/
+npm run rules:delta  # regenerate the committed assets/rules/*-delta.json from the fetched PDFs
+```
+
+To update a rulebook, change its entry in `sources.json` (url, `bytes`, `sha256`, `date`), then run both commands. A deploy fails if a download does not match its digest, or if a delta was made from other files.
 
 Pushing to `main` builds and publishes to GitHub Pages via [`.github/workflows/deploy-gh-pages.yml`](.github/workflows/deploy-gh-pages.yml). The first run turns Pages on and points it at Actions itself, so a fresh fork needs nothing set by hand beyond having Actions enabled.

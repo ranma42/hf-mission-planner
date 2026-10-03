@@ -6,6 +6,8 @@
   "scripts": {
     "build": "webpack --mode production",
     "typecheck": "tsc --noEmit",
+    "rules:fetch": "node scripts/rules.mjs fetch",
+    "rules:delta": "node scripts/rules.mjs delta",
     "start:dev": "webpack-dev-server --mode development",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist"
@@ -23,6 +25,7 @@
   "dependencies": {
     "closure-heap": "^1.0.0",
     "d3-zoom": "^3.0.0",
+    "pdfjs-dist": "^6.3.289",
     "react": "^16.12.0",
     "react-dom": "^16.12.0"
   },
@@ -32,11 +35,12 @@
     "@types/react": "^16.14.68",
     "@types/react-dom": "^16.9.25",
     "css-loader": "^6.7.3",
+    "diff": "^9.0.0",
     "file-loader": "^6.2.0",
     "gh-pages": "^5.0.0",
     "style-loader": "^1.3.0",
     "typescript": "^5.9.3",
-    "webpack": "^5.76.0",
+    "webpack": "^5.111.1",
     "webpack-cli": "^5.0.1",
     "webpack-dev-server": "^5.0.4"
   }

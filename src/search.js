@@ -272,6 +272,32 @@ export function createSearch({mapData, thrust, pivots, fuelNum, fuelDen, solarSe
     return 0
   }
 
+  /** Straight-line length of every edge, in millionths of the map's width.
+   * Integers, so the totals compare exactly: a tie-breaker that drifted in its
+   * last bits would decide arbitrarily, which is the thing it exists to stop.
+   * Positions do not move during a search, so this is measured once rather than
+   * per relaxation. @type {Record<string, Record<string, number>>} */
+  const edgeLength = {}
+  for (const edge of mapData.edges) {
+    const [a, b] = edge.split(':')
+    const pa = mapData.points[a], pb = mapData.points[b]
+    if (!pa || !pb) continue
+    const d = Math.round(Math.hypot(pa.x - pb.x, pa.y - pb.y) * 1e6)
+    if (!edgeLength[a]) edgeLength[a] = {}
+    if (!edgeLength[b]) edgeLength[b] = {}
+    edgeLength[a][b] = d
+    edgeLength[b][a] = d
+  }
+
+  /** @param {PathNode} u @param {PathNode} v */
+  function lengthWeight(u, v) {
+    // Changing state without moving covers no ground.
+    if (u.node === v.node) return 0
+    const row = edgeLength[u.node]
+    if (!row) return 0
+    return row[v.node] ?? 0
+  }
+
   /** @param {PathNode} u @param {PathNode} v */
   function segmentWeight(u, v) {
     const { points } = mapData
@@ -291,15 +317,27 @@ export function createSearch({mapData, thrust, pivots, fuelNum, fuelDen, solarSe
     const hazards = hazardWeight(u, v)
     const radHazards = radHazardWeight(u, v)
     const segments = segmentWeight(u, v)
-    return {fuel, burns, pivots, turns, hazards, radHazards, segments}
+    const length = lengthWeight(u, v)
+    // A pivot stands in for a direction change that would otherwise cost two
+    // burns, so counting it as two is what makes a route that spends one
+    // comparable with a route that burns through instead.
+    const effort = burns + 2 * pivots
+    return {fuel, burns, pivots, turns, hazards, radHazards, segments, length, effort}
   }
 
   /** Tie-breakers, in the order they are consulted, appended after the metrics
-   * by both weight functions. They decide which of several equally optimal
-   * paths is the one shown, so the reported burns are the fewest that buy this
-   * trade-off rather than whichever path happened to be found first.
-   * @type {(TrackedKey|'segments')[]} */
-  const TIE_BREAKERS = [...TRACKED_METRICS, 'segments']
+   * by both weight functions. Dominance stops at the metrics, so these cost
+   * nothing in the size of the front; what they settle is which of several
+   * equally optimal paths is the one shown.
+   *
+   * Effort leads, being what the route actually spends, with a pivot counted as
+   * the two burns it stands in for so that the choice never turns on which of
+   * the two a vehicle happens to have. Then the two that decide how a route
+   * reads on the map: fewest segments, then shortest. Burns and pivots bring up
+   * the rear, settling the rare route that ties on all of the above and keeping
+   * the figures in the panel from depending on the order the search ran in.
+   * @type {(TrackedKey|'segments'|'length'|'effort')[]} */
+  const TIE_BREAKERS = ['effort', 'segments', 'length', ...TRACKED_METRICS]
 
   /** @param {MetricKey[]} order @returns {(u: PathNode, v: PathNode) => number[]} */
   function makeNodeWeight(order) {

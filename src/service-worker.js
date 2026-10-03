@@ -1,5 +1,5 @@
 /*
- * Emitted to dist/sw.js by the build, which fills in the two constants below.
+ * Emitted to dist/sw.js by the build, which fills in the constants below.
  * Not imported by anything and not app code, so it is excluded from tsconfig:
  * it runs in a ServiceWorkerGlobalScope, which the project's DOM lib does not
  * model.
@@ -8,6 +8,27 @@ const VERSION = '__VERSION__'
 const SHELL = __SHELL__
 const CACHE = `hf-planner-${VERSION}`
 const INDEX = './index.html'
+/** The rulebook PDFs. Their names carry their digest, so a cached copy is
+ * never stale and the cache outlives the build that filled it. */
+const RULES = __RULES__
+const RULES_CACHE = __RULES_CACHE__
+
+/**
+ * Stores whichever rulebooks are not stored yet, and drops the ones this build
+ * no longer lists. Failures are tolerated: over a hundred megabytes on a
+ * tablet's connection can easily be cut short, the app is fully usable
+ * without them, and the rules page can fill the gaps on request.
+ */
+async function precacheRules() {
+  const cache = await caches.open(RULES_CACHE)
+  const wanted = new Set(RULES.map((path) => new URL(path, self.location.href).href))
+  for (const request of await cache.keys()) {
+    if (!wanted.has(request.url)) await cache.delete(request)
+  }
+  await Promise.allSettled([...wanted].map(async (url) => {
+    if (!(await cache.match(url))) await cache.add(url)
+  }))
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
@@ -29,6 +50,20 @@ self.addEventListener('activate', (event) => {
   })())
 })
 
+// Pages ask for the rulebooks once they are running. Not done in install or
+// activate: both hold up the new version (activate even holds up every fetch)
+// until they finish, and a hundred-odd megabytes can take minutes. A message
+// keeps the worker alive just as well without blocking anything, and since
+// every page load sends one, an interrupted download resumes next time.
+/** The run in progress, which further requests join instead of downloading
+ * everything a second time. @type {Promise<void> | null} */
+let rulesPending = null
+self.addEventListener('message', (event) => {
+  if (event.data !== 'precache-rules') return
+  rulesPending ??= precacheRules().finally(() => { rulesPending = null })
+  event.waitUntil(rulesPending)
+})
+
 self.addEventListener('fetch', (event) => {
   const request = event.request
   if (request.method !== 'GET') return
@@ -40,7 +75,8 @@ self.addEventListener('fetch', (event) => {
       try {
         return await fetch(request)
       } catch (e) {
-        return (await caches.match(INDEX)) || (await caches.match('./')) || Response.error()
+        const page = new URL(request.url).pathname.endsWith('/rules.html') ? './rules.html' : INDEX
+        return (await caches.match(page)) || (await caches.match('./')) || Response.error()
       }
     })())
     return
@@ -55,7 +91,8 @@ self.addEventListener('fetch', (event) => {
     // up available offline, without being downloaded before it is wanted.
     const response = await fetch(request)
     if (response.ok && response.type === 'basic') {
-      const cache = await caches.open(CACHE)
+      const isRulebook = RULES.some((path) => new URL(path, self.location.href).href === request.url)
+      const cache = await caches.open(isRulebook ? RULES_CACHE : CACHE)
       cache.put(request, response.clone())
     }
     return response
