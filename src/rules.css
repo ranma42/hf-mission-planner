@@ -58,6 +58,51 @@ a { color: #9cf; }
 .Rules-button:disabled { opacity: 0.4; cursor: default; }
 .Rules-credits { color: #888; font-size: 14px; margin-top: 32px; }
 
+/* --- Changes --- */
+
+.Delta-controls {
+  position: sticky;
+  top: 0;
+  background: black;
+  padding: 8px 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  font-size: 15px;
+  border-bottom: 2px solid #444;
+}
+.Rules-filter {
+  font: inherit;
+  font-size: 16px;
+  flex: 1 1 220px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #888;
+  background: #111;
+  color: white;
+}
+.Delta-list { list-style: none; padding: 0; margin: 0; }
+.Delta-hunk {
+  border-bottom: 1px solid #333;
+  padding: 10px 0;
+}
+.Delta-where {
+  display: flex;
+  gap: 16px;
+  font-size: 14px;
+}
+.Delta-section { font-weight: bold; min-width: 3em; }
+.Delta-text { margin: 4px 0 0; color: #bbb; overflow-wrap: anywhere; }
+.Delta-text del, .Rules-intro del {
+  color: #f99;
+  background: rgba(255, 80, 80, 0.15);
+}
+.Delta-text ins, .Rules-intro ins {
+  color: #9f9;
+  background: rgba(80, 255, 80, 0.15);
+}
+
 /* --- Viewer --- */
 
 .Viewer-bar {

@@ -7,6 +7,7 @@
     "build": "webpack --mode production",
     "typecheck": "tsc --noEmit",
     "rules:fetch": "node scripts/rules.mjs fetch",
+    "rules:delta": "node scripts/rules.mjs delta",
     "start:dev": "webpack-dev-server --mode development",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist"
@@ -34,6 +35,7 @@
     "@types/react": "^16.14.68",
     "@types/react-dom": "^16.9.25",
     "css-loader": "^6.7.3",
+    "diff": "^9.0.0",
     "file-loader": "^6.2.0",
     "gh-pages": "^5.0.0",
     "style-loader": "^1.3.0",

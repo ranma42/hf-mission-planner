@@ -47,7 +47,7 @@ Routes are ranked by fuel, then turns, then hazards, then radiation hazards. Dra
 
 ### Rules
 
-The 📖 button in the top-left corner opens the rulebooks: Core, Appendix, Module 1 and Module 2. For each one there is the edition ION Game Design publishes for download and the current living rules. M1 has no living-rules PDF yet. The viewer can search the whole book. The PDFs are stored for offline use when the app is opened, and the rules page has a button that downloads any that are still missing.
+The 📖 button in the top-left corner opens the rulebooks: Core, Appendix, Module 1 and Module 2. For each one there is the edition ION Game Design publishes for download and the current living rules. M1 has no living-rules PDF yet. There is also a list of the text changes between the two editions. The viewer can search the whole book. The PDFs are stored for offline use when the app is opened, and the rules page has a button that downloads any that are still missing.
 
 ### Edit mode
 
@@ -84,8 +84,9 @@ The rulebook PDFs are too big for git, so `assets/rules/sources.json` records th
 
 ```sh
 npm run rules:fetch  # download them into .cache/rules/, check them, and copy them into dist/rules/
+npm run rules:delta  # regenerate the committed assets/rules/*-delta.json from the fetched PDFs
 ```
 
-To update a rulebook, change its entry in `sources.json` (url, `bytes`, `sha256`, `date`), then fetch it again. A deploy fails if a download does not match its digest.
+To update a rulebook, change its entry in `sources.json` (url, `bytes`, `sha256`, `date`), then run both commands. A deploy fails if a download does not match its digest, or if a delta was made from other files.
 
 Pushing to `main` builds and publishes to GitHub Pages via [`.github/workflows/deploy-gh-pages.yml`](.github/workflows/deploy-gh-pages.yml). The first run turns Pages on and points it at Actions itself, so a fresh fork needs nothing set by hand beyond having Actions enabled.
