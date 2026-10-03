@@ -2,6 +2,9 @@ const path = require('path')
 const fs = require('fs')
 const webpack = require('webpack')
 
+const {documentPath, RULES_CACHE} = require('./src/rulesSources.mjs')
+const rulesSources = require('./assets/rules/sources.json')
+
 const SW_TEMPLATE = path.resolve(__dirname, 'src/service-worker.js')
 
 /**
@@ -11,13 +14,20 @@ const SW_TEMPLATE = path.resolve(__dirname, 'src/service-worker.js')
  *
  * Assets above `shellMaxBytes` are left out: the two map images are ~7MB
  * together and only one edition is ever used in a session, so they are cached
- * on first use instead of downloaded at install time.
+ * on first use instead of downloaded at install time. The limit sits above
+ * PDF.js's worker, which the rules viewer cannot work offline without.
+ *
+ * The rulebooks are listed separately, as `rules`: they are not part of the
+ * build (scripts/rules.mjs fetches them into dist/) and are kept in a cache of
+ * their own that survives deploys.
  */
 class ServiceWorkerPlugin {
-  constructor({filename = 'sw.js', shellMaxBytes = 1024 * 1024, extra = []} = {}) {
+  constructor({filename = 'sw.js', shellMaxBytes = 2 * 1024 * 1024, extra = [], rules = [], rulesCache}) {
     this.filename = filename
     this.shellMaxBytes = shellMaxBytes
     this.extra = extra
+    this.rules = rules
+    this.rulesCache = rulesCache
   }
 
   apply(compiler) {
@@ -36,7 +46,9 @@ class ServiceWorkerPlugin {
           const source = template
             .replace(/__VERSION__/g, compilation.hash)
             .replace(/__SHELL__/g, JSON.stringify(shell, null, 2))
-          if (source.includes('__VERSION__') || source.includes('__SHELL__')) {
+            .replace(/__RULES__/g, JSON.stringify(this.rules, null, 2))
+            .replace(/__RULES_CACHE__/g, JSON.stringify(this.rulesCache))
+          if (/__(VERSION|SHELL|RULES|RULES_CACHE)__/.test(source)) {
             compilation.errors.push(new Error('ServiceWorkerPlugin: placeholders left unsubstituted'))
           }
           compilation.emitAsset(this.filename, new sources.RawSource(source))
@@ -91,6 +103,8 @@ module.exports = (_, argv = {}) => {
       // them; name them explicitly for the precache.
       new ServiceWorkerPlugin({
         extra: ['./', './index.html', './rules.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'],
+        rules: rulesSources.documents.map((doc) => './' + documentPath(doc)),
+        rulesCache: RULES_CACHE,
       }),
     ],
   }

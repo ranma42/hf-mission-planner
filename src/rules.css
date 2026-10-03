@@ -37,6 +37,25 @@ a { color: #9cf; }
 .Rules-book li a { font-weight: bold; }
 .Rules-missing { color: #888; font-weight: bold; }
 .Rules-meta { color: #aaa; font-size: 15px; }
+.Rules-offline {
+  border-top: 2px solid #444;
+  padding-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.Rules-button {
+  font: inherit;
+  font-size: 16px;
+  color: white;
+  background: black;
+  border: 2px solid white;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.Rules-button:disabled { opacity: 0.4; cursor: default; }
 .Rules-credits { color: #888; font-size: 14px; margin-top: 32px; }
 
 /* --- Viewer --- */

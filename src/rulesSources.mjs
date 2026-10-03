@@ -20,3 +20,10 @@ export function documentPath(doc) {
   return `rules/${doc.book}-${doc.edition}.${doc.sha256.slice(0, 12)}.pdf`
 }
 
+/**
+ * The Cache Storage cache the rulebooks are kept in. Unlike the app's own
+ * cache it is not replaced on every deploy, since the PDFs rarely change and
+ * are far too big to download again each time; the service worker prunes it
+ * to the documents the current build lists instead.
+ */
+export const RULES_CACHE = 'hf-rules'

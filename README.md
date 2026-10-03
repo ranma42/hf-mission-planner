@@ -47,7 +47,7 @@ Routes are ranked by fuel, then turns, then hazards, then radiation hazards. Dra
 
 ### Rules
 
-The 📖 button in the top-left corner opens the rulebooks: Core, Appendix, Module 1 and Module 2. For each one there is the edition ION Game Design publishes for download and the current living rules. M1 has no living-rules PDF yet. The viewer can search the whole book.
+The 📖 button in the top-left corner opens the rulebooks: Core, Appendix, Module 1 and Module 2. For each one there is the edition ION Game Design publishes for download and the current living rules. M1 has no living-rules PDF yet. The viewer can search the whole book. The PDFs are stored for offline use when the app is opened, and the rules page has a button that downloads any that are still missing.
 
 ### Edit mode
 

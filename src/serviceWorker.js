@@ -23,4 +23,7 @@ export function registerServiceWorker() {
     navigator.serviceWorker.register('sw.js', {updateViaCache: 'none'})
       .catch(e => console.warn('service worker registration failed', e))
   })
+  // Have the worker store any rulebooks it does not have yet. See the message
+  // handler in service-worker.js for why this is not part of installing it.
+  navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage('precache-rules'))
 }
