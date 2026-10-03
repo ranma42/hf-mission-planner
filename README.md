@@ -45,6 +45,10 @@ Routes are ranked by fuel, then turns, then hazards, then radiation hazards. Dra
 
 **Explore alternatives** replaces that list with every route that is best under *some* ordering of the four, not just the one your current ranking picks — so you can see what a turn is worth in fuel before deciding. Hover a row to preview that route on the map, and click it to keep it.
 
+### Rules
+
+The 📖 button in the top-left corner opens the rulebooks: Core, Appendix, Module 1 and Module 2. For each one there is the edition ION Game Design publishes for download and the current living rules. M1 has no living-rules PDF yet. The viewer can search the whole book.
+
 ### Edit mode
 
 If you're developing this tool you might want to edit the map data to fix errors or update the map to a new version. You're in luck, HF Mission Planner has an edit mode optimized for fast input (and certainly not for ease of learning or intuitiveness). If you find yourself in a position to use it, the best reference is probably the source code, but here's a list of keyboard shortcuts as of writing:

@@ -1,7 +1,8 @@
 // Offline support. Registered only for real builds: during `start:dev` a
 // service worker would serve yesterday's bundle back at you. The path is
 // relative so it resolves under a project subpath on GitHub Pages, which also
-// scopes the worker to the app rather than the whole origin.
+// scopes the worker to the app rather than the whole origin. Both pages
+// register it, since either can be the one a tablet opens first.
 export function registerServiceWorker() {
   if (!__PROD__ || !('serviceWorker' in navigator)) return
   // A new worker takes over immediately and deletes the previous build's cache.

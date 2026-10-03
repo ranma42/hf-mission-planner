@@ -52,7 +52,10 @@ module.exports = (_, argv = {}) => {
 
   return {
     mode,
-    entry: './src/index.js',
+    entry: {
+      main: './src/index.js',
+      rules: './src/rules.js',
+    },
     output: {
       filename: '[name].bundle.js',
       chunkFilename: '[name].bundle.js',
@@ -72,6 +75,11 @@ module.exports = (_, argv = {}) => {
           test: /\.(png|jpg)$/,
           use: ['file-loader'],
         },
+        {
+          // Icons referenced from PDF.js's viewer stylesheet.
+          test: /\.(svg|gif)$/,
+          type: 'asset/resource',
+        },
       ],
     },
     optimization: {
@@ -82,7 +90,7 @@ module.exports = (_, argv = {}) => {
       // Hand-written files live in dist/ and are tracked, so webpack never sees
       // them; name them explicitly for the precache.
       new ServiceWorkerPlugin({
-        extra: ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'],
+        extra: ['./', './index.html', './rules.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'],
       }),
     ],
   }

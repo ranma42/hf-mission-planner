@@ -1,0 +1,119 @@
+html, body {
+  margin: 0;
+  background: black;
+  color: white;
+  font-family: sans-serif;
+}
+a { color: #9cf; }
+
+.Rules-index, .Rules-delta {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px;
+  font-size: 18px;
+  line-height: 1.4;
+}
+.Rules-header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.Rules-header h1 { margin: 8px 0; font-size: 26px; }
+.Rules-back { white-space: nowrap; }
+.Rules-intro { color: #ccc; }
+.Rules-book {
+  border-top: 2px solid #444;
+  padding: 4px 0 8px;
+}
+.Rules-book h2 { font-size: 20px; margin: 8px 0; }
+.Rules-book ul { list-style: none; padding: 0; margin: 0; }
+.Rules-book li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+}
+.Rules-book li a { font-weight: bold; }
+.Rules-missing { color: #888; font-weight: bold; }
+.Rules-meta { color: #aaa; font-size: 15px; }
+.Rules-credits { color: #888; font-size: 14px; margin-top: 32px; }
+
+/* --- Viewer --- */
+
+.Viewer-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 52px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: black;
+  border-bottom: 2px solid #444;
+  z-index: 1;
+  font-size: 16px;
+  white-space: nowrap;
+}
+.Viewer-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.Viewer-find {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.Viewer-search {
+  font: inherit;
+  /* 16px keeps iOS from zooming the page when the field takes focus. */
+  font-size: 16px;
+  flex: 1 1 120px;
+  min-width: 80px;
+  max-width: 280px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #888;
+  background: #111;
+  color: white;
+}
+.Viewer-matches, .Viewer-page { color: #aaa; font-size: 14px; }
+.Viewer-zoom { display: flex; gap: 4px; }
+.Viewer-button {
+  font: inherit;
+  min-width: 36px;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  background: black;
+  border: 1px solid #888;
+  border-radius: 6px;
+  text-decoration: none;
+  cursor: pointer;
+}
+/* PDF.js positions pages relative to this, and requires it be absolute. */
+.Viewer-container {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  overflow: auto;
+  background: #333;
+}
+.Viewer-status {
+  position: fixed;
+  top: 50%; left: 0; right: 0;
+  text-align: center;
+  color: #ccc;
+}
+
+@media (max-width: 640px) {
+  .Viewer-title, .Viewer-page { display: none; }
+}

@@ -24,6 +24,7 @@
   "dependencies": {
     "closure-heap": "^1.0.0",
     "d3-zoom": "^3.0.0",
+    "pdfjs-dist": "^6.3.289",
     "react": "^16.12.0",
     "react-dom": "^16.12.0"
   },
