@@ -54,12 +54,24 @@ async function words(file) {
   let heading = ''
   let section = ''
   for (let page = 1; page <= pdf.numPages; page++) {
-    const content = await (await pdf.getPage(page)).getTextContent()
+    const content = await (await pdf.getPage(page)).getTextContent({includeMarkedContent: true})
     let line = ''
     /** @type {string[]} */
     const lines = []
+    // Tags of the marked-content sections the current item is inside.
+    /** @type {string[]} */
+    const open = []
     for (const item of content.items) {
-      if (!('str' in item)) continue
+      if (!('str' in item)) {
+        if (item.type === 'endMarkedContent') open.pop()
+        else open.push(item.tag ?? '')
+        continue
+      }
+      // InDesign tags placed artwork as PlacedPDF: the Sunspot Cycle placard,
+      // playmat excerpts and so on. Their text is too small to read, is often
+      // clipped mid-word, and differs between exports for no reason a reader
+      // could see, so it would only produce changes nobody can find.
+      if (open.includes('PlacedPDF')) continue
       line += item.str
       if (item.hasEOL) { lines.push(line); line = '' }
     }

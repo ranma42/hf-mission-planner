@@ -21,6 +21,49 @@ import { h } from './dom'
 // the main thread.
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href
 
+/**
+ * Makes a document's pages leave placed artwork out of their text: the
+ * Sunspot Cycle placard, playmat excerpts and so on, which InDesign tags as
+ * PlacedPDF. That text is too small to read and is often clipped mid-word, so
+ * searching found matches nobody could see. scripts/rulesDelta.mjs leaves it
+ * out of the deltas for the same reason.
+ *
+ * Done where the text is produced rather than in search alone: the find
+ * controller locates its highlights by position in the text layer's items, so
+ * both have to see the same text.
+ *
+ * @param {import('pdfjs-dist').PDFDocumentProxy} pdf
+ */
+async function skipPlacedArtwork(pdf) {
+  const proto = Object.getPrototypeOf(await pdf.getPage(1))
+  if (proto.streamTextContent.skipsPlacedArtwork) return
+  const original = proto.streamTextContent
+  /** @param {{includeMarkedContent?: boolean, disableNormalization?: boolean}} [params] */
+  const streamTextContent = function (params = {}) {
+    // Marked content is the only way to tell where artwork starts and ends,
+    // so always ask for it, and drop the markers again if the caller did not.
+    const stream = original.call(this, {...params, includeMarkedContent: true})
+    /** Tags of the marked-content sections the current item is inside. @type {string[]} */
+    const open = []
+    return stream.pipeThrough(new TransformStream({
+      transform(/** @type {{items: any[]}} */ chunk, controller) {
+        const items = []
+        for (const item of chunk.items) {
+          const inArtwork = open.includes('PlacedPDF')
+          if (item.type === 'beginMarkedContent' || item.type === 'beginMarkedContentProps') open.push(item.tag ?? '')
+          else if (item.type === 'endMarkedContent') open.pop()
+          if (inArtwork || open.includes('PlacedPDF')) continue
+          if (item.type && !params.includeMarkedContent) continue
+          items.push(item)
+        }
+        controller.enqueue({...chunk, items})
+      },
+    }))
+  }
+  streamTextContent.skipsPlacedArtwork = true
+  proto.streamTextContent = streamTextContent
+}
+
 /** The zoom steps the − and + buttons move between. */
 const SCALES = [0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 3]
 
@@ -107,7 +150,8 @@ export function openViewer(doc, initialPage, initialQuery) {
 
   // Range requests are off: the service worker answers from a whole cached
   // file, and PDF.js rejects a full response to a request for a range.
-  getDocument({url: path, disableRange: true}).promise.then((pdf) => {
+  getDocument({url: path, disableRange: true}).promise.then(async (pdf) => {
+    await skipPlacedArtwork(pdf)
     pdfViewer.setDocument(pdf)
     linkService.setDocument(pdf)
   }, (e) => {
